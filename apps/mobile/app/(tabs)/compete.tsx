@@ -7,7 +7,6 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
-  Animated,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
@@ -16,29 +15,7 @@ import { RANK_TIERS } from '@teezy/shared/types';
 import { RANK_COLORS } from '@teezy/shared/colors';
 
 const API_URL = process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:4000';
-
 const PRIMARY = '#1a7f4b';
-
-// ─── Mock data for UI preview (replaced by real API when endpoints exist) ────
-
-const MOCK_MY_RANK: { tier: RankTier; points: number; rank: number } = {
-  tier: 'scratch',
-  points: 1240,
-  rank: 47,
-};
-
-const MOCK_LEADERBOARD: LeaderboardEntry[] = [
-  { rank: 1,  userId: 'u1', userName: 'Jordan T.',  avatarUrl: null, tier: 'champion', points: 7820, wins: 34, losses: 6,  avgScore: 71.2 },
-  { rank: 2,  userId: 'u2', userName: 'Riley C.',   avatarUrl: null, tier: 'elite',    points: 5540, wins: 28, losses: 10, avgScore: 72.4 },
-  { rank: 3,  userId: 'u3', userName: 'Sam M.',     avatarUrl: null, tier: 'elite',    points: 4980, wins: 25, losses: 12, avgScore: 73.1 },
-  { rank: 4,  userId: 'u4', userName: 'Alex P.',    avatarUrl: null, tier: 'pro',      points: 3720, wins: 20, losses: 14, avgScore: 74.0 },
-  { rank: 5,  userId: 'u5', userName: 'Casey L.',   avatarUrl: null, tier: 'pro',      points: 3140, wins: 18, losses: 15, avgScore: 74.6 },
-  { rank: 6,  userId: 'u6', userName: 'Morgan K.',  avatarUrl: null, tier: 'pro',      points: 2810, wins: 16, losses: 16, avgScore: 75.2 },
-  { rank: 7,  userId: 'u7', userName: 'Drew F.',    avatarUrl: null, tier: 'scratch',  points: 1980, wins: 14, losses: 18, avgScore: 76.1 },
-  { rank: 8,  userId: 'u8', userName: 'Quinn B.',   avatarUrl: null, tier: 'scratch',  points: 1760, wins: 12, losses: 19, avgScore: 76.8 },
-  { rank: 9,  userId: 'u9', userName: 'Blair W.',   avatarUrl: null, tier: 'scratch',  points: 1590, wins: 11, losses: 21, avgScore: 77.4 },
-  { rank: 47, userId: 'me', userName: 'You',        avatarUrl: null, tier: 'scratch',  points: 1240, wins: 9,  losses: 24, avgScore: 78.2 },
-];
 
 // ─── Sub-components ────────────────────────────────────────────────────────
 
@@ -144,16 +121,45 @@ export default function CompeteScreen() {
   const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('main');
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [myRank, setMyRank] = useState<{ tier: RankTier; points: number; rank: number | null }>({
+    tier: 'rookie',
+    points: 0,
+    rank: null,
+  });
 
-  // In a real app these come from the API
-  const entries = MOCK_LEADERBOARD;
-  const myRank = MOCK_MY_RANK;
+  const fetchData = useCallback(async (tab: Tab) => {
+    if (!session?.access_token) return;
+    setLoading(true);
+    try {
+      const headers = { Authorization: `Bearer ${session.access_token}` };
+      const [lbRes, meRes] = await Promise.all([
+        fetch(`${API_URL}/v1/rankings/leaderboard?type=${tab}&limit=50`, { headers }),
+        fetch(`${API_URL}/v1/rankings/me?type=${tab}`, { headers }),
+      ]);
+      if (lbRes.ok) {
+        const { data } = await lbRes.json();
+        setEntries(data ?? []);
+      }
+      if (meRes.ok) {
+        const { data } = await meRes.json();
+        setMyRank({ tier: data.tier ?? 'rookie', points: data.points ?? 0, rank: data.rank ?? null });
+      }
+    } catch {
+      // Network unavailable — keep existing data
+    } finally {
+      setLoading(false);
+    }
+  }, [session?.access_token]);
 
-  const onRefresh = useCallback(() => {
+  useEffect(() => { fetchData(activeTab); }, [activeTab, fetchData]);
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 800);
-  }, []);
+    await fetchData(activeTab);
+    setRefreshing(false);
+  }, [activeTab, fetchData]);
 
   const tabLabels: { id: Tab; label: string }[] = [
     { id: 'main', label: 'Global' },
@@ -187,7 +193,9 @@ export default function CompeteScreen() {
           <RankBadge tier={myRank.tier} size="lg" />
           <View style={{ marginLeft: 16, flex: 1 }}>
             <Text style={styles.myRankTitle}>Your Rank</Text>
-            <Text style={styles.myRankPos}>#{myRank.rank} globally</Text>
+            <Text style={styles.myRankPos}>
+              {myRank.rank != null ? `#${myRank.rank} globally` : 'Unranked'}
+            </Text>
             <RankProgressBar tier={myRank.tier} points={myRank.points} />
           </View>
         </View>
@@ -211,7 +219,7 @@ export default function CompeteScreen() {
         >
           <Text style={styles.quickIcon}>🎖️</Text>
           <Text style={styles.quickLabel}>Tournaments</Text>
-          <Text style={styles.quickSub}>3 upcoming</Text>
+          <Text style={styles.quickSub}>View upcoming</Text>
         </TouchableOpacity>
       </View>
 
@@ -238,13 +246,15 @@ export default function CompeteScreen() {
 
         {loading ? (
           <ActivityIndicator color={PRIMARY} style={{ marginTop: 32 }} />
+        ) : entries.length === 0 ? (
+          <Text style={styles.emptyText}>No rankings yet — play some rounds to earn points!</Text>
         ) : (
           <View style={styles.table}>
             {entries.map((entry) => (
               <LeaderboardRow
                 key={entry.userId}
                 entry={entry}
-                isMe={entry.userId === 'me'}
+                isMe={entry.userId === session?.user?.id}
               />
             ))}
           </View>
@@ -380,6 +390,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   sectionTitle: { fontSize: 17, fontWeight: '800', color: '#111', marginBottom: 12 },
+  emptyText: { fontSize: 14, color: '#9ca3af', textAlign: 'center', paddingVertical: 24 },
 
   // Tabs
   tabs: {

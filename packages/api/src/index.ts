@@ -15,6 +15,9 @@ import { analyticsRouter } from './routes/analytics';
 import { paymentsRouter } from './routes/payments';
 import { scorecardsRouter } from './routes/scorecards';
 import { partiesRouter } from './routes/parties';
+import { rankingsRouter } from './routes/rankings';
+import { leaguesRouter } from './routes/leagues';
+import { tournamentsRouter } from './routes/tournaments';
 
 const app = new Hono();
 
@@ -47,6 +50,9 @@ app.route('/v1/analytics', analyticsRouter);
 app.route('/v1/payments', paymentsRouter);
 app.route('/v1/scorecards', scorecardsRouter);
 app.route('/v1/parties', partiesRouter);
+app.route('/v1/rankings', rankingsRouter);
+app.route('/v1/leagues', leaguesRouter);
+app.route('/v1/tournaments', tournamentsRouter);
 
 // 404
 app.notFound((c) => {

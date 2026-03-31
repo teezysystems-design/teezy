@@ -5,3 +5,6 @@ export * from './social';
 export * from './waitlist';
 export * from './scorecards';
 export * from './parties';
+export * from './rankings';
+export * from './leagues';
+export * from './tournaments';
