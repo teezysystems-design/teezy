@@ -17,6 +17,8 @@ export interface User {
   email: string;
   name: string;
   avatarUrl: string | null;
+  bio: string | null;
+  isPrivate: boolean;
   handicap: number | null;
   moodPreferences: Mood[];
   location: GeoPoint | null;
@@ -252,6 +254,94 @@ export interface TournamentLeaderboardEntry {
   holesCompleted: number;
   scoreToPar: number;
   roundScores: number[];
+}
+
+// ============================================================
+// Phase 3: Availability Calendar & Social Feed Types
+// ============================================================
+
+/** ISO weekday numbers: 0=Sun 1=Mon … 6=Sat */
+export interface UserAvailability {
+  userId: string;
+  availableDays: number[];
+  updatedAt: Date;
+}
+
+export type FeedPostType =
+  | 'round_score'
+  | 'swing_video'
+  | 'rank_up'
+  | 'tournament_result'
+  | 'league_result';
+
+export interface RoundScorePayload {
+  courseId: string;
+  courseName: string;
+  totalScore: number;
+  scoreToPar: number;
+  holes: number;
+}
+
+export interface SwingVideoPayload {
+  videoUrl: string;
+  thumbnailUrl: string | null;
+  caption: string | null;
+}
+
+export interface RankUpPayload {
+  fromTier: RankTier;
+  toTier: RankTier;
+  points: number;
+}
+
+export interface TournamentResultPayload {
+  tournamentId: string;
+  tournamentName: string;
+  rank: number;
+  totalScore: number;
+}
+
+export interface LeagueResultPayload {
+  leagueId: string;
+  leagueName: string;
+  wins: number;
+  losses: number;
+  rank: number;
+}
+
+export type FeedPostPayload =
+  | RoundScorePayload
+  | SwingVideoPayload
+  | RankUpPayload
+  | TournamentResultPayload
+  | LeagueResultPayload;
+
+export interface FeedPost {
+  id: string;
+  userId: string;
+  type: FeedPostType;
+  payload: FeedPostPayload;
+  likeCount: number;
+  commentCount: number;
+  likedByMe: boolean;
+  author: {
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+  };
+  createdAt: Date;
+}
+
+export interface PostComment {
+  id: string;
+  postId: string;
+  body: string;
+  author: {
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+  };
+  createdAt: Date;
 }
 
 // ============================================================

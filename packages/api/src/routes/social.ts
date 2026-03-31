@@ -10,6 +10,10 @@ import {
   groupMembers,
   chatMessages,
   rounds,
+  userAvailability,
+  feedPosts,
+  postLikes,
+  postComments,
 } from '@teezy/db';
 import { authMiddleware } from '../middleware/auth';
 
@@ -479,7 +483,7 @@ socialRouter.post(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ACTIVITY FEED
+// ACTIVITY FEED (legacy — shared rounds from friends)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GET /v1/social/activity  — shared rounds from friends
@@ -608,5 +612,311 @@ socialRouter.patch(
       return c.json({ error: { code: 'NOT_FOUND', message: 'Round not found' } }, 404);
     }
     return c.json({ data: updated });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AVAILABILITY CALENDAR
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /v1/social/availability/me  — my availability
+socialRouter.get('/availability/me', authMiddleware, async (c) => {
+  const { supabaseUserId } = c.get('user');
+  const userId = await resolveUserId(supabaseUserId);
+  if (!userId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  const [row] = await db
+    .select()
+    .from(userAvailability)
+    .where(eq(userAvailability.userId, userId))
+    .limit(1);
+
+  return c.json({ data: row ?? { userId, availableDays: [], updatedAt: null } });
+});
+
+// PUT /v1/social/availability/me  — set my weekly available days
+socialRouter.put(
+  '/availability/me',
+  authMiddleware,
+  zValidator(
+    'json',
+    z.object({
+      availableDays: z.array(z.number().int().min(0).max(6)),
+    })
+  ),
+  async (c) => {
+    const { supabaseUserId } = c.get('user');
+    const { availableDays } = c.req.valid('json');
+    const userId = await resolveUserId(supabaseUserId);
+    if (!userId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+    const [row] = await db
+      .insert(userAvailability)
+      .values({ userId, availableDays, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: userAvailability.userId,
+        set: { availableDays, updatedAt: new Date() },
+      })
+      .returning();
+
+    return c.json({ data: row });
+  }
+);
+
+// GET /v1/social/availability/:userId  — view a friend's availability
+socialRouter.get('/availability/:userId', authMiddleware, async (c) => {
+  const { userId: targetUserId } = c.req.param();
+  const { supabaseUserId } = c.get('user');
+  const actorId = await resolveUserId(supabaseUserId);
+  if (!actorId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  // Must be accepted friends
+  const [friendship] = await db
+    .select({ id: friendships.id })
+    .from(friendships)
+    .where(
+      and(
+        eq(friendships.status, 'accepted'),
+        or(
+          and(eq(friendships.requesterId, actorId), eq(friendships.addresseeId, targetUserId)),
+          and(eq(friendships.requesterId, targetUserId), eq(friendships.addresseeId, actorId))
+        )
+      )
+    )
+    .limit(1);
+
+  if (!friendship) {
+    return c.json({ error: { code: 'FORBIDDEN', message: 'Can only view friends availability' } }, 403);
+  }
+
+  const [row] = await db
+    .select()
+    .from(userAvailability)
+    .where(eq(userAvailability.userId, targetUserId))
+    .limit(1);
+
+  return c.json({ data: row ?? { userId: targetUserId, availableDays: [], updatedAt: null } });
+});
+
+// GET /v1/social/availability/suggest  — days all invitees are free (for party creation)
+socialRouter.get(
+  '/availability/suggest',
+  authMiddleware,
+  zValidator('query', z.object({ userIds: z.string() })),
+  async (c) => {
+    const { supabaseUserId } = c.get('user');
+    const { userIds } = c.req.valid('query');
+    const actorId = await resolveUserId(supabaseUserId);
+    if (!actorId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+    const ids = userIds.split(',').filter(Boolean);
+    if (ids.length === 0) {
+      return c.json({ data: { suggestedDays: [] } });
+    }
+
+    const allIds = [actorId, ...ids];
+    const rows = await db
+      .select({ userId: userAvailability.userId, availableDays: userAvailability.availableDays })
+      .from(userAvailability)
+      .where(sql`${userAvailability.userId} = ANY(${allIds}::uuid[])`);
+
+    if (rows.length === 0) return c.json({ data: { suggestedDays: [] } });
+
+    // Intersect all availableDays arrays
+    const sets = rows.map((r) => new Set(r.availableDays));
+    const intersection = [...sets[0]].filter((day) => sets.every((s) => s.has(day)));
+
+    return c.json({ data: { suggestedDays: intersection.sort() } });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FEED POSTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const createPostSchema = z.object({
+  type: z.enum(['round_score', 'swing_video', 'rank_up', 'tournament_result', 'league_result']),
+  payload: z.record(z.unknown()),
+});
+
+// GET /v1/social/feed  — posts from friends (all types)
+socialRouter.get('/feed', authMiddleware, async (c) => {
+  const { supabaseUserId } = c.get('user');
+  const userId = await resolveUserId(supabaseUserId);
+  if (!userId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  const friendRows = await db
+    .select({
+      friendId: sql<string>`CASE WHEN requester_id = ${userId} THEN addressee_id ELSE requester_id END`,
+    })
+    .from(friendships)
+    .where(
+      and(
+        eq(friendships.status, 'accepted'),
+        or(eq(friendships.requesterId, userId), eq(friendships.addresseeId, userId))
+      )
+    );
+
+  const friendIds = [userId, ...friendRows.map((r) => r.friendId)];
+
+  const posts = await db
+    .select({
+      post: feedPosts,
+      author: {
+        id: users.id,
+        name: users.name,
+        avatarUrl: users.avatarUrl,
+      },
+    })
+    .from(feedPosts)
+    .innerJoin(users, eq(users.id, feedPosts.userId))
+    .where(sql`${feedPosts.userId} = ANY(${friendIds}::uuid[])`)
+    .orderBy(desc(feedPosts.createdAt))
+    .limit(50);
+
+  // Determine which posts the current user has liked
+  const postIds = posts.map((p) => p.post.id);
+  let likedSet = new Set<string>();
+  if (postIds.length > 0) {
+    const likeRows = await db
+      .select({ postId: postLikes.postId })
+      .from(postLikes)
+      .where(
+        and(
+          eq(postLikes.userId, userId),
+          sql`${postLikes.postId} = ANY(${postIds}::uuid[])`
+        )
+      );
+    likedSet = new Set(likeRows.map((r) => r.postId));
+  }
+
+  return c.json({
+    data: posts.map((p) => ({
+      ...p.post,
+      author: p.author,
+      likedByMe: likedSet.has(p.post.id),
+    })),
+  });
+});
+
+// POST /v1/social/feed  — create a post
+socialRouter.post('/feed', authMiddleware, zValidator('json', createPostSchema), async (c) => {
+  const { supabaseUserId } = c.get('user');
+  const { type, payload } = c.req.valid('json');
+  const userId = await resolveUserId(supabaseUserId);
+  if (!userId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  const [post] = await db
+    .insert(feedPosts)
+    .values({ userId, type, payload })
+    .returning();
+
+  return c.json({ data: post }, 201);
+});
+
+// POST /v1/social/feed/:id/like  — like a post
+socialRouter.post('/feed/:id/like', authMiddleware, async (c) => {
+  const { id: postId } = c.req.param();
+  const { supabaseUserId } = c.get('user');
+  const userId = await resolveUserId(supabaseUserId);
+  if (!userId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  const [existing] = await db
+    .select({ id: postLikes.id })
+    .from(postLikes)
+    .where(and(eq(postLikes.postId, postId), eq(postLikes.userId, userId)))
+    .limit(1);
+
+  if (existing) {
+    return c.json({ error: { code: 'CONFLICT', message: 'Already liked' } }, 409);
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.insert(postLikes).values({ postId, userId });
+    await tx
+      .update(feedPosts)
+      .set({ likeCount: sql`like_count + 1` })
+      .where(eq(feedPosts.id, postId));
+  });
+
+  return c.json({ data: { liked: true } }, 201);
+});
+
+// DELETE /v1/social/feed/:id/like  — unlike a post
+socialRouter.delete('/feed/:id/like', authMiddleware, async (c) => {
+  const { id: postId } = c.req.param();
+  const { supabaseUserId } = c.get('user');
+  const userId = await resolveUserId(supabaseUserId);
+  if (!userId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  const deleted = await db
+    .delete(postLikes)
+    .where(and(eq(postLikes.postId, postId), eq(postLikes.userId, userId)))
+    .returning();
+
+  if (deleted.length === 0) {
+    return c.json({ error: { code: 'NOT_FOUND', message: 'Like not found' } }, 404);
+  }
+
+  await db
+    .update(feedPosts)
+    .set({ likeCount: sql`GREATEST(like_count - 1, 0)` })
+    .where(eq(feedPosts.id, postId));
+
+  return c.json({ data: { liked: false } });
+});
+
+// GET /v1/social/feed/:id/comments  — list comments on a post
+socialRouter.get('/feed/:id/comments', authMiddleware, async (c) => {
+  const { id: postId } = c.req.param();
+  const { supabaseUserId } = c.get('user');
+  const userId = await resolveUserId(supabaseUserId);
+  if (!userId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  const comments = await db
+    .select({
+      id: postComments.id,
+      postId: postComments.postId,
+      body: postComments.body,
+      createdAt: postComments.createdAt,
+      author: {
+        id: users.id,
+        name: users.name,
+        avatarUrl: users.avatarUrl,
+      },
+    })
+    .from(postComments)
+    .innerJoin(users, eq(users.id, postComments.userId))
+    .where(eq(postComments.postId, postId))
+    .orderBy(postComments.createdAt);
+
+  return c.json({ data: comments });
+});
+
+// POST /v1/social/feed/:id/comments  — add a comment
+socialRouter.post(
+  '/feed/:id/comments',
+  authMiddleware,
+  zValidator('json', z.object({ body: z.string().min(1).max(500) })),
+  async (c) => {
+    const { id: postId } = c.req.param();
+    const { body } = c.req.valid('json');
+    const { supabaseUserId } = c.get('user');
+    const userId = await resolveUserId(supabaseUserId);
+    if (!userId) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+    const [comment] = await db.transaction(async (tx) => {
+      const [c] = await tx
+        .insert(postComments)
+        .values({ postId, userId, body })
+        .returning();
+      await tx
+        .update(feedPosts)
+        .set({ commentCount: sql`comment_count + 1` })
+        .where(eq(feedPosts.id, postId));
+      return [c];
+    });
+
+    return c.json({ data: comment }, 201);
   }
 );

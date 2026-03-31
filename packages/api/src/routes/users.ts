@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
-import { db, users } from '@teezy/db';
+import { eq, and, or } from 'drizzle-orm';
+import { db, users, friendships } from '@teezy/db';
 import { authMiddleware } from '../middleware/auth';
 
 export const usersRouter = new Hono();
@@ -26,6 +26,8 @@ const createProfileSchema = z.object({
 
 const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
+  bio: z.string().max(300).nullable().optional(),
+  isPrivate: z.boolean().optional(),
   handicap: z.number().min(0).max(54).nullable().optional(),
   moodPreferences: z.array(moodEnum).optional(),
   locationLat: z.number().min(-90).max(90).nullable().optional(),
@@ -86,6 +88,8 @@ usersRouter.patch('/me', authMiddleware, zValidator('json', updateProfileSchema)
 
   const updates: Partial<typeof users.$inferInsert> = {};
   if (body.name !== undefined) updates.name = body.name;
+  if (body.bio !== undefined) updates.bio = body.bio;
+  if (body.isPrivate !== undefined) updates.isPrivate = body.isPrivate;
   if (body.handicap !== undefined) updates.handicap = body.handicap != null ? String(body.handicap) : null;
   if (body.moodPreferences !== undefined) updates.moodPreferences = body.moodPreferences;
   if (body.locationLat !== undefined) updates.locationLat = body.locationLat != null ? String(body.locationLat) : null;
@@ -106,4 +110,67 @@ usersRouter.patch('/me', authMiddleware, zValidator('json', updateProfileSchema)
   }
 
   return c.json({ data: updated });
+});
+
+// GET /v1/users/:id — public profile (respects privacy)
+usersRouter.get('/:id', authMiddleware, async (c) => {
+  const { id: targetId } = c.req.param();
+  const { supabaseUserId } = c.get('user');
+
+  const [me] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.supabaseUserId, supabaseUserId))
+    .limit(1);
+  if (!me) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  const [target] = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      avatarUrl: users.avatarUrl,
+      bio: users.bio,
+      isPrivate: users.isPrivate,
+      handicap: users.handicap,
+      moodPreferences: users.moodPreferences,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .where(eq(users.id, targetId))
+    .limit(1);
+
+  if (!target) {
+    return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+  }
+
+  // If private, only accepted friends (or self) can see full profile
+  if (target.isPrivate && me.id !== targetId) {
+    const [friendship] = await db
+      .select({ id: friendships.id })
+      .from(friendships)
+      .where(
+        and(
+          eq(friendships.status, 'accepted'),
+          or(
+            and(eq(friendships.requesterId, me.id), eq(friendships.addresseeId, targetId)),
+            and(eq(friendships.requesterId, targetId), eq(friendships.addresseeId, me.id))
+          )
+        )
+      )
+      .limit(1);
+
+    if (!friendship) {
+      // Return limited public stub
+      return c.json({
+        data: {
+          id: target.id,
+          name: target.name,
+          avatarUrl: target.avatarUrl,
+          isPrivate: true,
+        },
+      });
+    }
+  }
+
+  return c.json({ data: target });
 });

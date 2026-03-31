@@ -1,10 +1,12 @@
-import { pgTable, text, timestamp, decimal, jsonb, uuid } from 'drizzle-orm/pg-core';
+import { boolean, pgTable, text, timestamp, decimal, jsonb, uuid } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull().unique(),
   name: text('name').notNull(),
   avatarUrl: text('avatar_url'),
+  bio: text('bio'),
+  isPrivate: boolean('is_private').notNull().default(false),
   handicap: decimal('handicap', { precision: 4, scale: 1 }),
   moodPreferences: jsonb('mood_preferences').$type<string[]>().default([]),
   locationLat: decimal('location_lat', { precision: 9, scale: 6 }),
