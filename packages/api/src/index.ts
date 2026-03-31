@@ -8,6 +8,7 @@ import { healthRouter } from './routes/health';
 import { coursesRouter } from './routes/courses';
 import { usersRouter } from './routes/users';
 import { bookingsRouter } from './routes/bookings';
+import { socialRouter } from './routes/social';
 
 const app = new Hono();
 
@@ -33,6 +34,7 @@ app.route('/health', healthRouter);
 app.route('/v1/courses', coursesRouter);
 app.route('/v1/users', usersRouter);
 app.route('/v1/bookings', bookingsRouter);
+app.route('/v1/social', socialRouter);
 
 // 404
 app.notFound((c) => {

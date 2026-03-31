@@ -43,6 +43,18 @@ export const groupMembers = pgTable('group_members', {
   joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const chatMessages = pgTable('chat_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  groupId: uuid('group_id')
+    .notNull()
+    .references(() => groups.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  body: text('body').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const rounds = pgTable('rounds', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id')
