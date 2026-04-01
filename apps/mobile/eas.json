@@ -1,16 +1,25 @@
 {
-  "cli": { "version": ">= 7.0.0" },
+  "cli": {
+    "version": ">= 7.0.0",
+    "appVersionSource": "local"
+  },
   "build": {
+    "base": {
+      "node": "20.0.0"
+    },
     "development": {
+      "extends": "base",
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
+      "extends": "base",
       "distribution": "internal",
       "ios": { "simulator": false },
       "android": { "buildType": "apk" }
     },
     "production": {
+      "extends": "base",
       "ios": { "autoIncrement": true },
       "android": { "autoIncrement": true }
     }
