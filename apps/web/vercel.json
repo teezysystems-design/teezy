@@ -1,4 +1,4 @@
 {
   "installCommand": "cd ../.. && npm install",
-  "buildCommand": "node ../../node_modules/next/dist/bin/next build"
+  "buildCommand": "npm run build"
 }
