@@ -128,7 +128,7 @@ const SAMPLE_COURSES = [
   },
   {
     name: 'Streamsong Resort - Blue Course',
-    description: 'Florida's most acclaimed modern course with rolling terrain.',
+    description: "Florida's most acclaimed modern course with rolling terrain.",
     locationLat: '27.751400',
     locationLng: '-81.863400',
     address: '1000 Streamsong Dr, Streamsong, FL 33834',
