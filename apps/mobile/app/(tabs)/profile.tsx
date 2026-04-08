@@ -77,6 +77,91 @@ const MOCK_EARNED_BADGES: { tier: RankTier; earnedAt: string }[] = [
   { tier: 'scratch',     earnedAt: 'Mar 2026' },
 ];
 
+// Rank history data shape
+interface RankHistoryPoint {
+  label: string;   // e.g. "Jan", "Feb"
+  points: number;
+  tier: RankTier;
+}
+
+const MOCK_RANK_HISTORY: RankHistoryPoint[] = [
+  { label: 'Oct', points: 0,    tier: 'rookie' },
+  { label: 'Nov', points: 180,  tier: 'rookie' },
+  { label: 'Dec', points: 420,  tier: 'amateur' },
+  { label: 'Jan', points: 650,  tier: 'amateur' },
+  { label: 'Feb', points: 900,  tier: 'club_player' },
+  { label: 'Mar', points: 1240, tier: 'scratch' },
+];
+
+// ─── Rank History Chart ─────────────────────────────────────────────────────
+
+function RankHistoryChart({ history }: { history: RankHistoryPoint[] }) {
+  if (history.length === 0) return null;
+  const maxPts = Math.max(...history.map((h) => h.points), 1);
+  return (
+    <View style={rh.container}>
+      <View style={rh.bars}>
+        {history.map((point) => {
+          const heightPct = Math.max(point.points / maxPts, 0.04);
+          const colors = RANK_COLORS[point.tier];
+          return (
+            <View key={point.label} style={rh.barCol}>
+              <View style={rh.barTrack}>
+                <View
+                  style={[
+                    rh.barFill,
+                    {
+                      height: `${Math.round(heightPct * 100)}%` as `${number}%`,
+                      backgroundColor: colors.border,
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={rh.barLabel}>{point.label}</Text>
+              <Text style={rh.barIcon}>{RANK_TIERS.find((r) => r.tier === point.tier)?.icon}</Text>
+            </View>
+          );
+        })}
+      </View>
+      <View style={rh.yAxis}>
+        {[1, 0.5, 0].map((fraction) => (
+          <Text key={fraction} style={rh.yLabel}>
+            {Math.round(maxPts * fraction).toLocaleString()}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const rh = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    height: 120,
+    gap: 8,
+  },
+  yAxis: {
+    width: 36,
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    paddingBottom: 28,
+  },
+  yLabel: { fontSize: 9, color: '#9ca3af', fontWeight: '500' },
+  bars: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  barCol: { flex: 1, alignItems: 'center', gap: 2 },
+  barTrack: {
+    width: '100%',
+    height: 80,
+    borderRadius: 6,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  barFill: { width: '100%', borderRadius: 6 },
+  barLabel: { fontSize: 9, color: '#6b7280', fontWeight: '500' },
+  barIcon: { fontSize: 10 },
+});
+
 // ─── Badge component ────────────────────────────────────────────────────────
 
 function BadgePill({ tier, earnedAt }: { tier: RankTier; earnedAt: string }) {
@@ -256,6 +341,7 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [sharedRounds, setSharedRounds] = useState<RoundPost[]>([]);
   const [friendCount, setFriendCount] = useState<number>(0);
+  const [rankHistory, setRankHistory] = useState<RankHistoryPoint[]>(MOCK_RANK_HISTORY);
   const [fetching, setFetching] = useState(true);
   const [editing, setEditing] = useState(false);
 
@@ -281,8 +367,38 @@ export default function ProfileScreen() {
         setFriendCount((json.data ?? []).length);
       }
 
-      // Fetch shared rounds from activity feed (own rounds)
-      // TODO: replace with dedicated user rounds endpoint when available
+      // Fetch own recent rounds
+      const roundsRes = await fetch(`${API_URL}/v1/rounds/me?limit=6`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (roundsRes.ok) {
+        const json = await roundsRes.json();
+        const rounds = (json.data ?? []) as Array<{
+          id: string; courseName: string; totalScore: number; scoreToPar: number;
+          completedAt: string; holeCount: number;
+        }>;
+        setSharedRounds(
+          rounds.map((r) => ({
+            id: r.id,
+            courseName: r.courseName,
+            totalScore: r.totalScore,
+            scoreToPar: r.scoreToPar,
+            date: new Date(r.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            holes: r.holeCount,
+          }))
+        );
+      }
+
+      // Fetch rank history
+      const historyRes = await fetch(`${API_URL}/v1/rankings/history`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (historyRes.ok) {
+        const json = await historyRes.json();
+        if ((json.data ?? []).length > 0) {
+          setRankHistory(json.data as RankHistoryPoint[]);
+        }
+      }
     } catch {
       // silent
     } finally {
@@ -447,6 +563,17 @@ export default function ProfileScreen() {
         ))}
       </ScrollView>
 
+      {/* ── Rank History Chart ─────────────────────────────────── */}
+      <View style={pr.sectionHeader}>
+        <Text style={pr.sectionTitle}>Rank History</Text>
+        <TouchableOpacity onPress={() => router.push('/notifications')}>
+          <Text style={pr.sectionLink}>🔔 Notifications</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={pr.rankHistoryCard}>
+        <RankHistoryChart history={rankHistory} />
+      </View>
+
       {/* ── Moods ────────────────────────────────────────────────── */}
       {(profile.moodPreferences?.length ?? 0) > 0 && (
         <View style={pr.moodsSection}>
@@ -467,7 +594,9 @@ export default function ProfileScreen() {
       {/* ── Posts grid ─────────────────────────────────────────── */}
       <View style={pr.sectionHeader}>
         <Text style={pr.sectionTitle}>Rounds</Text>
-        <Text style={pr.sectionSub}>{sharedRounds.length > 0 ? `${sharedRounds.length} shared` : 'None shared yet'}</Text>
+        <TouchableOpacity onPress={() => router.push('/rounds')}>
+          <Text style={pr.sectionLink}>View all →</Text>
+        </TouchableOpacity>
       </View>
       {sharedRounds.length > 0 ? (
         <View style={pr.postsGrid}>
@@ -596,11 +725,26 @@ const pr = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: '#111' },
   sectionSub: { fontSize: 13, color: '#9ca3af' },
+  sectionLink: { fontSize: 13, color: PRIMARY, fontWeight: '700' },
 
   // Badges
   badgesRow: { paddingLeft: 16, paddingRight: 8, paddingBottom: 4, gap: 8 },
 
   // Moods
+  rankHistoryCard: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 1,
+  },
   moodsSection: { paddingHorizontal: 16, marginTop: 20 },
   moodsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   moodChip: {

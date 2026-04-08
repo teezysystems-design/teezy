@@ -1,4 +1,4 @@
-import { boolean, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, date, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { courses } from './courses';
 
@@ -63,4 +63,18 @@ export const leagueMatches = pgTable('league_matches', {
   scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
   playedAt: timestamp('played_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const leagueSeasons = pgTable('league_seasons', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  leagueId: uuid('league_id')
+    .notNull()
+    .references(() => leagues.id, { onDelete: 'cascade' }),
+  seasonNumber: integer('season_number').notNull().default(1),
+  startDate: date('start_date').notNull(),
+  endDate: date('end_date').notNull(),
+  isActive: boolean('is_active').notNull().default(true),
+  winnerId: uuid('winner_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

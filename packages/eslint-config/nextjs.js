@@ -1,0 +1,13 @@
+/** @type {import("eslint").Linter.Config} */
+module.exports = {
+  extends: [
+    require.resolve('./index.js'),
+    'next/core-web-vitals',
+  ],
+  rules: {
+    '@next/next/no-html-link-for-pages': 'off',
+  },
+  env: {
+    browser: true,
+  },
+};

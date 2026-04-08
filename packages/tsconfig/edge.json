@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Vercel Edge / Cloudflare Workers",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "WebWorker"],
+    "target": "ES2022",
+    "moduleResolution": "Bundler"
+  }
+}

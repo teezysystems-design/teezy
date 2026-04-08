@@ -19,6 +19,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
+import * as Contacts from 'expo-contacts';
 
 const API_URL = process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:4000';
 
@@ -407,6 +408,9 @@ function FriendsTab() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchId, setSearchId] = useState('');
   const [adding, setAdding] = useState(false);
+  const [contactsMatches, setContactsMatches] = useState<Friend[]>([]);
+  const [syncingContacts, setSyncingContacts] = useState(false);
+  const [contactsSynced, setContactsSynced] = useState(false);
 
   const fetchAll = useCallback(
     async (silent = false) => {
@@ -479,6 +483,53 @@ function FriendsTab() {
     }
   };
 
+  const handleSyncContacts = async () => {
+    Alert.alert(
+      'Sync Contacts',
+      'PAR-Tee would like to access your contacts to help you find friends who already play. Your contacts are only used to match accounts and are never stored.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Allow',
+          onPress: async () => {
+            setSyncingContacts(true);
+            try {
+              const { status } = await Contacts.requestPermissionsAsync();
+              if (status !== 'granted') {
+                Alert.alert('Permission denied', 'You can enable contacts access in Settings.');
+                return;
+              }
+              const { data } = await Contacts.getContactsAsync({
+                fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails],
+              });
+              const phones = data.flatMap((c) => (c.phoneNumbers ?? []).map((p) => p.number ?? '')).filter(Boolean);
+              const emails = data.flatMap((c) => (c.emails ?? []).map((e) => e.email ?? '')).filter(Boolean);
+
+              if (!session) return;
+              const res = await fetch(`${API_URL}/v1/social/friends/contact-sync`, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${session.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ phones: phones.slice(0, 500), emails: emails.slice(0, 500) }),
+              });
+              if (res.ok) {
+                const json = await res.json();
+                setContactsMatches(json.data ?? []);
+                setContactsSynced(true);
+              }
+            } catch {
+              Alert.alert('Error', 'Could not sync contacts. Please try again.');
+            } finally {
+              setSyncingContacts(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleDecline = async (requestId: string) => {
     if (!session) return;
     try {
@@ -534,6 +585,56 @@ function FriendsTab() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Sync contacts banner */}
+      {!contactsSynced ? (
+        <TouchableOpacity
+          style={fr.syncBanner}
+          onPress={handleSyncContacts}
+          disabled={syncingContacts}
+          activeOpacity={0.8}
+        >
+          {syncingContacts ? (
+            <ActivityIndicator color={C.primary} size="small" />
+          ) : (
+            <>
+              <Text style={fr.syncBannerEmoji}>📱</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={fr.syncBannerTitle}>Find friends from contacts</Text>
+                <Text style={fr.syncBannerSub}>Discover who already plays PAR-Tee</Text>
+              </View>
+              <Text style={fr.syncBannerArrow}>›</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      ) : contactsMatches.length > 0 ? (
+        <View style={{ marginBottom: 16 }}>
+          <Text style={fr.sectionLabel}>From Your Contacts ({contactsMatches.length})</Text>
+          {contactsMatches.filter((m) => !friends.some((f) => f.id === m.id)).map((match) => (
+            <View key={match.id} style={fr.requestCard}>
+              <View style={fr.reqInfo}>
+                <Text style={fr.reqName}>{match.name}</Text>
+                {match.handicap != null && (
+                  <Text style={fr.reqHcp}>HCP {Number(match.handicap).toFixed(1)}</Text>
+                )}
+              </View>
+              <TouchableOpacity
+                style={fr.acceptBtn}
+                onPress={() => {
+                  setSearchId(match.id);
+                  handleSendRequest();
+                }}
+              >
+                <Text style={fr.acceptBtnText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <View style={fr.syncedEmpty}>
+          <Text style={fr.syncedEmptyText}>✅ No new contacts found on PAR-Tee</Text>
+        </View>
+      )}
 
       {/* Pending requests */}
       {requests.length > 0 && (
@@ -636,6 +737,24 @@ const fr = StyleSheet.create({
     justifyContent: 'center',
   },
   declineBtnText: { fontSize: 13, color: C.gray400 },
+
+  syncBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.primaryLight,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#b2dfcc',
+  },
+  syncBannerEmoji: { fontSize: 24 },
+  syncBannerTitle: { fontSize: 14, fontWeight: '700', color: C.primary },
+  syncBannerSub: { fontSize: 12, color: '#2d7a55', marginTop: 2 },
+  syncBannerArrow: { fontSize: 22, color: C.primary, fontWeight: '300' },
+  syncedEmpty: { padding: 12, marginBottom: 12 },
+  syncedEmptyText: { fontSize: 13, color: C.gray400, textAlign: 'center' },
 });
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────

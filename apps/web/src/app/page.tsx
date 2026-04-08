@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 
 const COLORS = {
   green: '#1a7f4b',
@@ -158,20 +159,26 @@ export default function LandingPage() {
             <span style={{ fontSize: '1.3rem' }}>⛳</span>
             <span style={{ fontWeight: 800, fontSize: '1.4rem', color: COLORS.green }}>PAR-Tee</span>
           </div>
-          <a
-            href="#waitlist"
-            style={{
-              background: COLORS.green,
-              color: COLORS.white,
-              padding: '0.5rem 1.4rem',
-              borderRadius: 8,
-              fontWeight: 600,
-              fontSize: '0.9rem',
-              transition: 'background 0.15s',
-            }}
-          >
-            Join Waitlist
-          </a>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+            <Link href="/golfers" style={{ color: COLORS.gray600, fontSize: '0.88rem', fontWeight: 500, textDecoration: 'none' }}>For Golfers</Link>
+            <Link href="/courses" style={{ color: COLORS.gray600, fontSize: '0.88rem', fontWeight: 500, textDecoration: 'none' }}>For Courses</Link>
+            <Link href="/pricing" style={{ color: COLORS.gray600, fontSize: '0.88rem', fontWeight: 500, textDecoration: 'none' }}>Pricing</Link>
+            <Link href="/how-it-works" style={{ color: COLORS.gray600, fontSize: '0.88rem', fontWeight: 500, textDecoration: 'none' }}>How It Works</Link>
+            <a
+              href="#waitlist"
+              style={{
+                background: COLORS.green,
+                color: COLORS.white,
+                padding: '0.5rem 1.4rem',
+                borderRadius: 8,
+                fontWeight: 600,
+                fontSize: '0.9rem',
+                transition: 'background 0.15s',
+              }}
+            >
+              Join Waitlist
+            </a>
+          </div>
         </div>
       </nav>
 
@@ -771,9 +778,17 @@ export default function LandingPage() {
             <span style={{ fontSize: '1.1rem' }}>⛳</span>
             <p style={{ color: COLORS.white, fontWeight: 800, fontSize: '1.2rem' }}>PAR-Tee</p>
           </div>
-          <p style={{ fontSize: '0.9rem', marginBottom: '0.4rem' }}>Book Golf by Mood — Coming Soon</p>
+          <p style={{ fontSize: '0.9rem', marginBottom: '0.75rem' }}>Book Golf by Mood — Coming Soon to Alberta</p>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '1.25rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            <Link href="/golfers" style={{ color: COLORS.gray400, fontSize: '0.85rem', textDecoration: 'none' }}>For Golfers</Link>
+            <Link href="/courses" style={{ color: COLORS.gray400, fontSize: '0.85rem', textDecoration: 'none' }}>For Courses</Link>
+            <Link href="/pricing" style={{ color: COLORS.gray400, fontSize: '0.85rem', textDecoration: 'none' }}>Pricing</Link>
+            <Link href="/how-it-works" style={{ color: COLORS.gray400, fontSize: '0.85rem', textDecoration: 'none' }}>How It Works</Link>
+            <Link href="/privacy" style={{ color: COLORS.gray400, fontSize: '0.85rem', textDecoration: 'none' }}>Privacy</Link>
+            <Link href="/terms" style={{ color: COLORS.gray400, fontSize: '0.85rem', textDecoration: 'none' }}>Terms</Link>
+          </div>
           <p style={{ fontSize: '0.82rem', marginTop: '0.5rem' }}>
-            &copy; {new Date().getFullYear()} PAR-Tee. All rights reserved.
+            &copy; {new Date().getFullYear()} PAR-Tee / XERN.CO. All rights reserved.
           </p>
         </div>
       </footer>

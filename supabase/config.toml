@@ -1,0 +1,47 @@
+# Supabase CLI project configuration for PAR-Tee
+# https://supabase.com/docs/reference/cli/config
+
+[project]
+project_ref = "to-be-set-after-provisioning"
+
+[db]
+# Canada region — ca-central-1
+# Migrations live in packages/db/src/migrations and are applied via Supabase CLI.
+migrations_dir = "packages/db/src/migrations"
+
+[auth]
+# Site URL — update once deployed
+site_url = "http://localhost:3000"
+additional_redirect_urls = [
+  "http://localhost:3000/**",
+  "exp://localhost:8081",
+  "partee://",
+]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+
+[auth.external.apple]
+enabled = true
+# client_id and secret set via environment variables
+
+[realtime]
+# Realtime tables are enabled via 0002 and 0013 migrations:
+#   chat_messages, tournament_entries, party_members, feed_posts, notifications
+enabled = true
+
+[storage]
+# Storage buckets are managed separately; add bucket names here as needed.
+# e.g. avatars, course-photos
+file_size_limit = "10MiB"
+
+[analytics]
+enabled = false
+
+[experimental]
+webhooks_enabled = false

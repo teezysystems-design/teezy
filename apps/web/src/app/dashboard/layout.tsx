@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { signOut, getCurrentUserEmail } from '@/lib/auth';
 
 const COLORS = {
   green: '#1a7f4b',
@@ -17,8 +19,8 @@ const COLORS = {
 
 const MANAGER_LINKS = [
   { href: '/dashboard', label: 'Overview', icon: '📊', exact: true },
-  { href: '/dashboard/availability', label: 'Availability', icon: '📅', exact: false },
-  { href: '/dashboard/events', label: 'Events', icon: '🎉', exact: false },
+  { href: '/dashboard/availability', label: 'Tee Times', icon: '📅', exact: false },
+  { href: '/dashboard/events', label: 'Tournaments', icon: '🏆', exact: false },
   { href: '/dashboard/analytics', label: 'Analytics', icon: '📈', exact: false },
   { href: '/dashboard/profile', label: 'Course Profile', icon: '🏌️', exact: false },
   { href: '/dashboard/billing', label: 'Billing', icon: '💰', exact: false },
@@ -34,8 +36,17 @@ const PROSHOP_LINKS = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isProShop = pathname.startsWith('/dashboard/proshop');
+  const isLogin = pathname === '/dashboard/login';
   const navLinks = isProShop ? PROSHOP_LINKS : MANAGER_LINKS;
   const dashboardLabel = isProShop ? 'Pro Shop' : 'Manager Dashboard';
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    setUserEmail(getCurrentUserEmail());
+  }, []);
+
+  // Login page renders without sidebar
+  if (isLogin) return <>{children}</>;
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: COLORS.gray50 }}>
@@ -178,7 +189,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </nav>
 
-        {/* Footer */}
+        {/* Footer / user */}
         <div
           style={{
             padding: '1rem 1.25rem',
@@ -187,7 +198,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             color: COLORS.gray600,
           }}
         >
-          PAR-Tee &copy; {new Date().getFullYear()}
+          {userEmail && (
+            <p style={{ marginBottom: '0.5rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {userEmail}
+            </p>
+          )}
+          <button
+            onClick={() => signOut()}
+            style={{
+              background: 'none',
+              border: `1px solid ${COLORS.gray200}`,
+              borderRadius: 6,
+              padding: '0.3rem 0.6rem',
+              fontSize: '0.75rem',
+              color: COLORS.gray600,
+              cursor: 'pointer',
+              width: '100%',
+            }}
+          >
+            Sign out
+          </button>
+          <p style={{ marginTop: '0.6rem' }}>PAR-Tee &copy; {new Date().getFullYear()}</p>
         </div>
       </aside>
 
