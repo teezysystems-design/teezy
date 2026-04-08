@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 
@@ -14,6 +15,8 @@ const COLORS = {
   gray900: '#111827',
   amber: '#f59e0b',
   amberPale: '#fffbeb',
+  red: '#ef4444',
+  redPale: '#fef2f2',
 };
 
 type PricingTier = 'standard' | 'basic_promotion' | 'active_promotion' | 'tournament' | 'founding';
@@ -71,9 +74,27 @@ interface CourseData {
   name: string;
 }
 
+interface Invoice {
+  id: string;
+  billing_period_start: string;
+  billing_period_end: string;
+  booking_count: number;
+  total_cents: number;
+  status: 'draft' | 'open' | 'paid' | 'void' | 'uncollectable';
+  due_date: string | null;
+  paid_at: string | null;
+}
+
+interface ConnectStatus {
+  connected: boolean;
+  detailsSubmitted: boolean;
+}
+
 export default function BillingPage() {
   const courseId = process.env['NEXT_PUBLIC_COURSE_ID'];
   const [course, setCourse] = useState<CourseData | null>(null);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [connectStatus, setConnectStatus] = useState<ConnectStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -81,15 +102,24 @@ export default function BillingPage() {
 
   useEffect(() => {
     if (!courseId) { setLoading(false); return; }
-    apiFetch(`/v1/courses/${courseId}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error();
+    Promise.all([
+      apiFetch(`/v1/courses/${courseId}`).then(async (res) => {
+        if (!res.ok) return;
         const { data } = await res.json();
         setCourse(data);
         setSelectedTier(data.pricingTier ?? 'standard');
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      }),
+      apiFetch(`/v1/billing/invoices?courseId=${courseId}&limit=6`).then(async (res) => {
+        if (!res.ok) return;
+        const { invoices: inv } = await res.json();
+        setInvoices(inv ?? []);
+      }),
+      apiFetch(`/v1/payments/connect/status/${courseId}`).then(async (res) => {
+        if (!res.ok) return;
+        const { data } = await res.json();
+        setConnectStatus(data);
+      }),
+    ]).finally(() => setLoading(false));
   }, [courseId]);
 
   const handleUpdateTier = async () => {
@@ -131,6 +161,135 @@ export default function BillingPage() {
         <p style={{ color: COLORS.gray600 }}>Loading...</p>
       ) : (
         <>
+          {/* Stripe Connect status banner */}
+          <div
+            style={{
+              background: connectStatus?.connected ? COLORS.greenPale : COLORS.amberPale,
+              border: `1.5px solid ${connectStatus?.connected ? COLORS.green : COLORS.amber}`,
+              borderRadius: 12,
+              padding: '1rem 1.25rem',
+              marginBottom: '1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '1rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: '50%',
+                  background: connectStatus?.connected ? COLORS.green : COLORS.amber,
+                  flexShrink: 0,
+                }}
+              />
+              <div>
+                <p style={{ fontWeight: 700, color: COLORS.gray900, fontSize: '0.9rem' }}>
+                  Stripe Connect:{' '}
+                  {connectStatus?.connected
+                    ? 'Active'
+                    : connectStatus?.detailsSubmitted
+                    ? 'Pending review'
+                    : 'Not connected'}
+                </p>
+                <p style={{ fontSize: '0.8rem', color: COLORS.gray600 }}>
+                  {connectStatus?.connected
+                    ? 'Invoices will be auto-charged to your connected account.'
+                    : 'Connect your Stripe account to enable automatic billing.'}
+                </p>
+              </div>
+            </div>
+            {!connectStatus?.connected && (
+              <Link
+                href="/dashboard/connect"
+                style={{
+                  background: COLORS.amber,
+                  color: COLORS.white,
+                  padding: '0.5rem 1rem',
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  textDecoration: 'none',
+                  flexShrink: 0,
+                }}
+              >
+                Set up →
+              </Link>
+            )}
+          </div>
+
+          {/* Invoice history */}
+          {invoices.length > 0 && (
+            <div
+              style={{
+                background: COLORS.white,
+                border: `1px solid ${COLORS.gray200}`,
+                borderRadius: 14,
+                padding: '1.5rem',
+                marginBottom: '1.5rem',
+              }}
+            >
+              <h2 style={{ fontWeight: 700, fontSize: '1.05rem', color: COLORS.gray900, marginBottom: '1rem' }}>
+                Invoice History
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {invoices.map((inv) => {
+                  const statusColor =
+                    inv.status === 'paid'
+                      ? COLORS.green
+                      : inv.status === 'open'
+                      ? COLORS.amber
+                      : inv.status === 'void' || inv.status === 'uncollectable'
+                      ? COLORS.gray600
+                      : COLORS.gray700;
+
+                  return (
+                    <div
+                      key={inv.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0.75rem 1rem',
+                        background: COLORS.gray50,
+                        borderRadius: 10,
+                        gap: '1rem',
+                      }}
+                    >
+                      <div>
+                        <p style={{ fontWeight: 600, color: COLORS.gray900, fontSize: '0.9rem' }}>
+                          {inv.billing_period_start} – {inv.billing_period_end}
+                        </p>
+                        <p style={{ fontSize: '0.8rem', color: COLORS.gray600 }}>
+                          {inv.booking_count} booking{inv.booking_count !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <p style={{ fontWeight: 700, color: COLORS.gray900 }}>
+                          ${(inv.total_cents / 100).toFixed(2)}
+                        </p>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color: statusColor,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.05em',
+                          }}
+                        >
+                          {inv.status}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Current plan banner */}
           <div
             style={{

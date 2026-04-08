@@ -13,6 +13,7 @@ import { socialRouter } from '../src/routes/social';
 import { leaguesRouter } from '../src/routes/leagues';
 import { tournamentsRouter } from '../src/routes/tournaments';
 import { billingRouter } from '../src/routes/billing';
+import { paymentsRouter } from '../src/routes/payments';
 import { notificationsRouter } from '../src/routes/notifications';
 import { aiMatchingRouter } from '../src/routes/ai-matching';
 
@@ -52,6 +53,7 @@ app.route('/social', socialRouter);
 app.route('/leagues', leaguesRouter);
 app.route('/tournaments', tournamentsRouter);
 app.route('/billing', billingRouter);
+app.route('/payments', paymentsRouter);
 app.route('/notifications', notificationsRouter);
 app.route('/ai-matching', aiMatchingRouter);
 

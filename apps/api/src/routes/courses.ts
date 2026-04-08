@@ -156,4 +156,83 @@ router.patch('/:id', authMiddleware, zValidator('json', courseUpdateSchema), asy
   return c.json({ course: data });
 });
 
+const pricingTierSchema = z.object({
+  pricingTier: z.enum(['standard', 'basic_promotion', 'active_promotion', 'tournament', 'founding']),
+});
+
+// PATCH /courses/:id/pricing-tier — update pricing tier (takes effect next billing cycle)
+router.patch('/:id/pricing-tier', standardRateLimit, authMiddleware, zValidator('json', pricingTierSchema), async (c) => {
+  const user = c.get('user');
+  const courseId = c.req.param('id');
+  const { pricingTier } = c.req.valid('json');
+  const supabase = createAdminClient();
+
+  // Staff check — only owner/manager can change pricing tier
+  const { data: staffCheck } = await supabase
+    .from('course_staff')
+    .select('role')
+    .eq('course_id', courseId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (!staffCheck || !['owner', 'manager'].includes(staffCheck.role)) {
+    forbidden('Only course owners and managers can change the pricing tier');
+  }
+
+  // Founding tier is locked — cannot be set by a course after initial assignment
+  const { data: current } = await supabase
+    .from('courses')
+    .select('pricing_tier')
+    .eq('id', courseId)
+    .single();
+
+  if (current?.pricing_tier === 'founding' && pricingTier !== 'founding') {
+    badRequest('Founding tier is locked and cannot be changed');
+  }
+  if (pricingTier === 'founding' && current?.pricing_tier !== 'founding') {
+    badRequest('Founding tier can only be assigned by PAR-Tee staff');
+  }
+
+  // Rate change takes effect next billing cycle — record in billing_rates
+  const TIER_RATES: Record<string, number> = {
+    standard: 275,
+    basic_promotion: 225,
+    active_promotion: 200,
+    tournament: 175,
+    founding: 150,
+  };
+
+  const ratePerBookingCents = TIER_RATES[pricingTier] ?? 275;
+
+  // Close out old rate record
+  await supabase
+    .from('billing_rates')
+    .update({ effective_to: new Date().toISOString() })
+    .eq('course_id', courseId)
+    .is('effective_to', null);
+
+  // Insert new rate — effective from start of next month
+  const now = new Date();
+  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+  await supabase.from('billing_rates').insert({
+    course_id: courseId,
+    pricing_tier: pricingTier,
+    rate_per_booking_cents: ratePerBookingCents,
+    effective_from: nextMonth.toISOString(),
+  });
+
+  // Update pricing_tier on the course record
+  const { data, error } = await supabase
+    .from('courses')
+    .update({ pricing_tier: pricingTier, updated_at: new Date().toISOString() })
+    .eq('id', courseId)
+    .select('id, name, pricing_tier')
+    .single();
+
+  if (error) badRequest(error.message);
+
+  return c.json({ data, effectiveFrom: nextMonth.toISOString().slice(0, 10) });
+});
+
 export { router as coursesRouter };
