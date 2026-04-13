@@ -16,7 +16,7 @@ import { useAuth } from '../../../src/context/AuthContext';
 const API_URL = process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:4000';
 
 const COLORS = {
-  primary: '#1a7f4b',
+  primary: '#1B6B3A',
   primaryLight: '#e8f5ee',
   white: '#fff',
   gray50: '#f7f7f7',
@@ -24,19 +24,16 @@ const COLORS = {
   gray600: '#666',
   gray900: '#111',
   border: '#e0e0e0',
-  error: '#ff4444',
+  error: '#ef4444',
+  gold: '#FFD700',
 };
 
 const GAME_MODE_LABELS: Record<string, string> = {
-  chill: '😎 Chill',
-  fun: '🎉 Fun',
-  competitive: '🏆 Competitive',
-};
-
-const CHALLENGE_LABELS: Record<string, string> = {
-  none: '⛳ Standard',
-  head_to_head: '⚔️ 1v1',
-  scramble_2v2: '🤝 2v2 Scramble',
+  casual: '😎 Casual',
+  solo: '🏌️ Solo',
+  match_1v1: '⚔️ 1v1 Match',
+  match_2v2: '🤝 2v2 Scramble',
+  tournament: '🏆 Tournament',
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -49,8 +46,11 @@ interface PartyMember {
   id: string;
   userId: string;
   status: 'invited' | 'accepted' | 'declined';
+  role: 'host' | 'member';
   name: string | null;
+  username: string | null;
   avatarUrl: string | null;
+  handicap: number | null;
 }
 
 interface Party {
@@ -58,9 +58,10 @@ interface Party {
   bookingId: string;
   createdByUserId: string;
   gameMode: string;
-  challengeType: string;
   status: string;
+  maxSize: number;
   members: PartyMember[];
+  courses?: { name: string; hole_count: number; par_score: number };
 }
 
 export default function PartyLobbyScreen() {
@@ -107,13 +108,14 @@ export default function PartyLobbyScreen() {
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ userId: inviteInput.trim() }),
+        body: JSON.stringify({ username: inviteInput.trim().toLowerCase() }),
       });
       const json = await res.json();
       if (!res.ok) {
         Alert.alert('Error', json.error?.message ?? 'Could not invite player');
         return;
       }
+      Alert.alert('Invited!', json.data?.message ?? 'Invite sent');
       setInviteInput('');
       fetchParty(true);
     } catch {
@@ -164,7 +166,7 @@ export default function PartyLobbyScreen() {
   }
 
   const acceptedCount = party.members.filter((m) => m.status === 'accepted').length;
-  const isCreator = true; // simplified — full auth check would compare session user id
+  const maxSize = party.maxSize || 4;
 
   return (
     <ScrollView
@@ -174,19 +176,26 @@ export default function PartyLobbyScreen() {
         <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchParty(true); }} tintColor={COLORS.primary} />
       }
     >
-      {/* Party info card */}
+      {/* Course & mode info card */}
       <View style={styles.infoCard}>
+        {party.courses && (
+          <Text style={styles.courseName}>{party.courses.name}</Text>
+        )}
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Mode</Text>
           <Text style={styles.infoValue}>{GAME_MODE_LABELS[party.gameMode] ?? party.gameMode}</Text>
         </View>
         <View style={[styles.infoRow, { marginTop: 8 }]}>
-          <Text style={styles.infoLabel}>Format</Text>
-          <Text style={styles.infoValue}>{CHALLENGE_LABELS[party.challengeType] ?? party.challengeType}</Text>
+          <Text style={styles.infoLabel}>Players</Text>
+          <Text style={styles.infoValue}>{acceptedCount} / {maxSize}</Text>
         </View>
         <View style={[styles.infoRow, { marginTop: 8 }]}>
-          <Text style={styles.infoLabel}>Players</Text>
-          <Text style={styles.infoValue}>{acceptedCount} / 4 accepted</Text>
+          <Text style={styles.infoLabel}>Status</Text>
+          <View style={[styles.statusBadge, party.status === 'in_progress' && styles.statusBadgeActive]}>
+            <Text style={[styles.statusText, party.status === 'in_progress' && styles.statusTextActive]}>
+              {party.status === 'forming' ? 'Forming' : party.status === 'in_progress' ? 'In Progress' : 'Completed'}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -199,27 +208,42 @@ export default function PartyLobbyScreen() {
               {(member.name ?? 'U').charAt(0).toUpperCase()}
             </Text>
           </View>
-          <Text style={styles.memberName}>{member.name ?? 'Unknown player'}</Text>
+          <View style={styles.memberInfo}>
+            <View style={styles.memberNameRow}>
+              <Text style={styles.memberName}>{member.name ?? 'Unknown player'}</Text>
+              {member.role === 'host' && <Text style={styles.hostBadge}>HOST</Text>}
+            </View>
+            {member.username && (
+              <Text style={styles.memberUsername}>@{member.username}</Text>
+            )}
+            {member.handicap != null && (
+              <Text style={styles.memberHcp}>HCP {Number(member.handicap).toFixed(1)}</Text>
+            )}
+          </View>
           <Text style={[styles.memberStatus, { color: STATUS_COLORS[member.status] ?? COLORS.gray600 }]}>
             {member.status}
           </Text>
         </View>
       ))}
 
-      {/* Invite friend */}
-      {isCreator && party.members.length < 4 && party.status === 'forming' && (
+      {/* Invite friend by username */}
+      {party.status === 'forming' && party.members.length < maxSize && (
         <View style={styles.inviteBox}>
           <Text style={styles.sectionTitle}>Invite a Friend</Text>
-          <Text style={styles.inviteHint}>Enter their user ID</Text>
+          <Text style={styles.inviteHint}>Enter their PAR-Tee username</Text>
           <View style={styles.inviteRow}>
-            <TextInput
-              style={styles.inviteInput}
-              value={inviteInput}
-              onChangeText={setInviteInput}
-              placeholder="User ID (uuid)"
-              placeholderTextColor={COLORS.gray400}
-              autoCapitalize="none"
-            />
+            <View style={styles.inviteInputWrap}>
+              <Text style={styles.atSign}>@</Text>
+              <TextInput
+                style={styles.inviteInput}
+                value={inviteInput}
+                onChangeText={setInviteInput}
+                placeholder="username"
+                placeholderTextColor={COLORS.gray400}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
             <TouchableOpacity
               style={[styles.inviteBtn, (inviting || !inviteInput.trim()) && { opacity: 0.5 }]}
               onPress={inviteFriend}
@@ -263,7 +287,7 @@ export default function PartyLobbyScreen() {
       {/* View summary if completed */}
       {party.status === 'completed' && (
         <TouchableOpacity
-          style={[styles.startBtn, { backgroundColor: '#555' }]}
+          style={[styles.startBtn, { backgroundColor: COLORS.gray900 }]}
           onPress={() => router.push({ pathname: '/party/[partyId]/summary', params: { partyId: party.id } })}
         >
           <Text style={styles.startBtnText}>View Summary →</Text>
@@ -286,9 +310,19 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     marginBottom: 24,
   },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  courseName: { fontSize: 18, fontWeight: '700', color: COLORS.gray900, marginBottom: 12 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   infoLabel: { fontSize: 14, color: COLORS.gray600 },
   infoValue: { fontSize: 14, fontWeight: '600', color: COLORS.gray900 },
+  statusBadge: {
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  statusBadgeActive: { backgroundColor: '#FEF3C7' },
+  statusText: { fontSize: 12, fontWeight: '600', color: COLORS.primary },
+  statusTextActive: { color: '#D97706' },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: COLORS.gray900, marginBottom: 12 },
   memberRow: {
     flexDirection: 'row',
@@ -302,26 +336,46 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   memberAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: COLORS.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   memberAvatarText: { fontSize: 18, fontWeight: '700', color: COLORS.primary },
-  memberName: { flex: 1, fontSize: 15, color: COLORS.gray900, fontWeight: '500' },
+  memberInfo: { flex: 1 },
+  memberNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  memberName: { fontSize: 15, color: COLORS.gray900, fontWeight: '600' },
+  hostBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.gold,
+    backgroundColor: '#FFFDF0',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  memberUsername: { fontSize: 13, color: COLORS.gray400, marginTop: 1 },
+  memberHcp: { fontSize: 12, color: COLORS.gray600, marginTop: 2 },
   memberStatus: { fontSize: 13, fontWeight: '600', textTransform: 'capitalize' },
   inviteBox: { marginTop: 24, marginBottom: 8 },
   inviteHint: { fontSize: 13, color: COLORS.gray600, marginBottom: 10 },
   inviteRow: { flexDirection: 'row', gap: 10 },
-  inviteInput: {
+  inviteInputWrap: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.white,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: COLORS.border,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
+  },
+  atSign: { fontSize: 16, color: COLORS.gray400, fontWeight: '600', marginRight: 2 },
+  inviteInput: {
+    flex: 1,
     paddingVertical: 10,
     fontSize: 14,
     color: COLORS.gray900,

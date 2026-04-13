@@ -17,6 +17,7 @@ import { paymentsRouter } from '../src/routes/payments';
 import { notificationsRouter } from '../src/routes/notifications';
 import { aiMatchingRouter } from '../src/routes/ai-matching';
 import { usersRouter } from '../src/routes/users';
+import { partiesRouter } from '../src/routes/parties';
 
 const app = new Hono();
 
@@ -58,6 +59,7 @@ app.route('/payments', paymentsRouter);
 app.route('/notifications', notificationsRouter);
 app.route('/ai-matching', aiMatchingRouter);
 app.route('/users', usersRouter);
+app.route('/parties', partiesRouter);
 
 // ─── Error handling ───────────────────────────────────────────────────────────
 

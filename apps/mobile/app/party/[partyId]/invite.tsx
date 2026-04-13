@@ -23,7 +23,7 @@ import { useAuth } from '../../../src/context/AuthContext';
 const API_URL = process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:4000';
 
 const C = {
-  primary: '#1a7f4b',
+  primary: '#1B6B3A',
   primaryLight: '#e8f5ee',
   white: '#fff',
   gray50: '#f7f7f7',
@@ -56,7 +56,7 @@ function Avatar({ name, size = 44 }: { name: string; size?: number }) {
 }
 
 const av = StyleSheet.create({
-  wrap: { backgroundColor: '#1a7f4b', alignItems: 'center', justifyContent: 'center' },
+  wrap: { backgroundColor: '#1B6B3A', alignItems: 'center', justifyContent: 'center' },
   initial: { color: '#fff', fontWeight: '800' },
 });
 
