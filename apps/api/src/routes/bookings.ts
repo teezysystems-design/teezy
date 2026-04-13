@@ -8,16 +8,35 @@ import { badRequest, notFound, conflict, forbidden } from '../lib/errors';
 
 const router = new Hono();
 
+// Helper: resolve Supabase auth UUID to users.id
+async (supabase: any, supabaseUserId: string) => {
+  const { data } = await supabase
+    .from('users')
+    .select('id')
+    .eq('supabase_user_id', supabaseUserId)
+    .single();
+  return data?.id;
+};
+
 // GET /bookings — list user's bookings
 router.get('/', standardRateLimit, authMiddleware, async (c) => {
   const user = c.get('user');
   const { status, limit, offset } = c.req.query();
   const supabase = createAdminClient();
 
+  // Resolve Supabase auth ID to users.id
+  const { data: userProfile } = await supabase
+    .from('users')
+    .select('id')
+    .eq('supabase_user_id', user.id)
+    .single();
+
+  if (!userProfile) notFound('User profile not found');
+
   let query = supabase
     .from('bookings')
     .select('*, tee_time_slots(starts_at, capacity), courses(name, address)')
-    .eq('user_id', user.id)
+    .eq('user_id', userProfile.id)
     .order('created_at', { ascending: false })
     .limit(Number(limit) || 20);
 
@@ -26,13 +45,22 @@ router.get('/', standardRateLimit, authMiddleware, async (c) => {
   const { data, error } = await query;
   if (error) badRequest(error.message);
 
-  return c.json({ bookings: data ?? [] });
+  return c.json({ data: data ?? [] });
 });
 
 // GET /bookings/:id
 router.get('/:id', standardRateLimit, authMiddleware, async (c) => {
   const user = c.get('user');
   const supabase = createAdminClient();
+
+  // Resolve Supabase auth ID to users.id
+  const { data: userProfile } = await supabase
+    .from('users')
+    .select('id')
+    .eq('supabase_user_id', user.id)
+    .single();
+
+  if (!userProfile) notFound('User profile not found');
 
   const { data, error } = await supabase
     .from('bookings')
@@ -41,18 +69,17 @@ router.get('/:id', standardRateLimit, authMiddleware, async (c) => {
     .single();
 
   if (error || !data) notFound('Booking not found');
-  if (data.user_id !== user.id) forbidden('Access denied');
+  if (data.user_id !== userProfile.id) forbidden('Access denied');
 
-  return c.json({ booking: data });
+  return c.json({ data });
 });
 
 const bookingCreateSchema = z.object({
-  slotId: z.string().uuid(),
+  teeTimeId: z.string().uuid(),
   partySize: z.number().int().min(1).max(4).default(1),
-  partyMemberIds: z.array(z.string().uuid()).default([]),
 });
 
-// POST /bookings — create booking atomically
+// POST /bookings — create booking atomically (FREE for golfers)
 router.post(
   '/',
   strictRateLimit,
@@ -63,11 +90,20 @@ router.post(
     const body = c.req.valid('json');
     const supabase = createAdminClient();
 
-    // 1. Fetch slot with pessimistic availability check
+    // Resolve Supabase auth ID to users.id
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('id')
+      .eq('supabase_user_id', user.id)
+      .single();
+
+    if (!userProfile) notFound('User profile not found');
+
+    // 1. Fetch slot with availability check
     const { data: slot, error: slotErr } = await supabase
       .from('tee_time_slots')
-      .select('*, courses(id, name, stripe_account_id, pricing_tier)')
-      .eq('id', body.slotId)
+      .select('*, courses(id, name, pricing_tier)')
+      .eq('id', body.teeTimeId)
       .single();
 
     if (slotErr || !slot) notFound('Tee time slot not found');
@@ -81,35 +117,43 @@ router.post(
     const { data: existingBooking } = await supabase
       .from('bookings')
       .select('id')
-      .eq('user_id', user.id)
-      .eq('slot_id', body.slotId)
+      .eq('user_id', userProfile.id)
+      .eq('slot_id', body.teeTimeId)
       .in('status', ['pending', 'confirmed'])
       .maybeSingle();
 
     if (existingBooking) conflict('You already have a booking for this tee time');
 
-    const totalPriceInCents = slot.price_in_cents * body.partySize;
+    // 3. Calculate booking_fee_cents based on course's pricing_tier
+    const TIER_TO_FEE: Record<string, number> = {
+      standard: 275,
+      basic_promotion: 225,
+      active_promotion: 200,
+      tournament: 175,
+      founding: 150,
+    };
 
-    // 3. Create booking
+    const bookingFeeCents = TIER_TO_FEE[slot.courses.pricing_tier] || 275;
+
+    // 4. Create booking (FREE for golfer, fee tracks what we bill the course)
     const { data: booking, error: bookingErr } = await supabase
       .from('bookings')
       .insert({
-        user_id: user.id,
-        slot_id: body.slotId,
+        user_id: userProfile.id,
+        slot_id: body.teeTimeId,
         course_id: slot.course_id,
         party_size: body.partySize,
-        total_price_in_cents: totalPriceInCents,
-        status: 'pending',
-        payment_status: 'pending',
+        booking_fee_cents: bookingFeeCents,
+        status: 'confirmed',
       })
       .select()
       .single();
 
     if (bookingErr) badRequest(bookingErr.message);
 
-    // 4. Increment booked_count on slot (atomic update)
+    // 5. Increment booked_count on slot (atomic update)
     const { error: updateErr } = await supabase.rpc('increment_booked_count', {
-      slot_id: body.slotId,
+      slot_id: body.teeTimeId,
       increment_by: body.partySize,
     });
 
@@ -118,27 +162,10 @@ router.post(
       await supabase
         .from('tee_time_slots')
         .update({ booked_count: slot.booked_count + body.partySize })
-        .eq('id', body.slotId);
+        .eq('id', body.teeTimeId);
     }
 
-    // 5. Create party members if provided
-    if (body.partyMemberIds.length > 0) {
-      await supabase.from('party_members').insert(
-        body.partyMemberIds.map((memberId) => ({
-          booking_id: booking.id,
-          user_id: memberId,
-        }))
-      );
-    }
-
-    // 6. Create party record
-    await supabase.from('parties').insert({
-      booking_id: booking.id,
-      organizer_id: user.id,
-      size: body.partySize,
-    }).select().single().then(() => {}).catch(() => {});
-
-    return c.json({ booking }, 201);
+    return c.json({ data: booking }, 201);
   }
 );
 
@@ -157,6 +184,15 @@ router.post(
     const bookingId = c.req.param('id');
     const supabase = createAdminClient();
 
+    // Resolve Supabase auth ID to users.id
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('id')
+      .eq('supabase_user_id', user.id)
+      .single();
+
+    if (!userProfile) notFound('User profile not found');
+
     const { data: booking, error } = await supabase
       .from('bookings')
       .select('*, tee_time_slots(starts_at, capacity)')
@@ -164,7 +200,7 @@ router.post(
       .single();
 
     if (error || !booking) notFound('Booking not found');
-    if (booking.user_id !== user.id) forbidden('Access denied');
+    if (booking.user_id !== userProfile.id) forbidden('Access denied');
     if (['cancelled', 'completed'].includes(booking.status)) {
       conflict(`Booking is already ${booking.status}`);
     }
@@ -200,7 +236,7 @@ router.post(
         .eq('id', booking.slot_id);
     });
 
-    return c.json({ booking: updated });
+    return c.json({ data: updated });
   }
 );
 

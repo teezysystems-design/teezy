@@ -8,10 +8,10 @@ import { notFound, badRequest, forbidden } from '../lib/errors';
 
 const router = new Hono();
 
-// GET /courses — list courses with optional PostGIS distance search
+// GET /courses — list courses with optional mood filtering and next tee time
 router.get('/', standardRateLimit, async (c) => {
   const supabase = createAdminClient();
-  const { lat, lng, radius, moodTags, limit, offset } = c.req.query();
+  const { lat, lng, radius, mood, moodTags, includeNextTeeTime, limit, offset } = c.req.query();
 
   let query = supabase
     .from('courses')
@@ -21,7 +21,27 @@ router.get('/', standardRateLimit, async (c) => {
     .limit(Number(limit) || 20)
     .range(Number(offset) || 0, (Number(offset) || 0) + (Number(limit) || 20) - 1);
 
-  if (moodTags) {
+  // Support mood filtering via course_mood_tags junction table
+  if (mood) {
+    const moodValues = mood.split(',').filter(Boolean);
+    if (moodValues.length > 0) {
+      // Use subquery to filter by mood tags
+      const { data: courseIds } = await supabase
+        .from('course_mood_tags')
+        .select('course_id')
+        .in('mood_tag', moodValues);
+
+      if (courseIds && courseIds.length > 0) {
+        const ids = courseIds.map(row => row.course_id);
+        query = query.in('id', ids);
+      } else {
+        return c.json({ data: [] });
+      }
+    }
+  }
+
+  // Support backward compat with moodTags JSONB column
+  if (moodTags && !mood) {
     const tags = moodTags.split(',').filter(Boolean);
     if (tags.length > 0) {
       query = query.contains('mood_tags', tags);
@@ -39,15 +59,76 @@ router.get('/', standardRateLimit, async (c) => {
     if (error) {
       // Fall back to regular list if RPC not available
       const { data: fallback } = await query;
-      return c.json({ courses: fallback ?? [] });
+      return c.json({ data: fallback ?? [] });
     }
-    return c.json({ courses: data ?? [] });
+
+    // If includeNextTeeTime, fetch next tee time for each course
+    if (includeNextTeeTime === 'true') {
+      const coursesWithTeeTime = await Promise.all(
+        (data ?? []).map(async (course) => {
+          const { data: nextSlot } = await supabase
+            .from('tee_time_slots')
+            .select('id, starts_at, capacity, booked_count, price_in_cents')
+            .eq('course_id', course.id)
+            .gt('starts_at', new Date().toISOString())
+            .lt('booked_count', 'capacity')
+            .order('starts_at')
+            .limit(1)
+            .single();
+
+          return {
+            ...course,
+            nextTeeTIme: nextSlot ? {
+              id: nextSlot.id,
+              startsAt: nextSlot.starts_at,
+              totalCapacity: nextSlot.capacity,
+              bookedCount: nextSlot.booked_count,
+              remainingSpots: Math.max(0, nextSlot.capacity - nextSlot.booked_count),
+              priceInCents: nextSlot.price_in_cents,
+            } : null,
+          };
+        })
+      );
+      return c.json({ data: coursesWithTeeTime });
+    }
+
+    return c.json({ data: data ?? [] });
   }
 
   const { data, error } = await query;
   if (error) badRequest(error.message);
 
-  return c.json({ courses: data ?? [] });
+  // If includeNextTeeTime, fetch next tee time for each course
+  if (includeNextTeeTime === 'true' && data) {
+    const coursesWithTeeTime = await Promise.all(
+      (data ?? []).map(async (course) => {
+        const { data: nextSlot } = await supabase
+          .from('tee_time_slots')
+          .select('id, starts_at, capacity, booked_count, price_in_cents')
+          .eq('course_id', course.id)
+          .gt('starts_at', new Date().toISOString())
+          .lt('booked_count', 'capacity')
+          .order('starts_at')
+          .limit(1)
+          .single();
+
+        return {
+          ...course,
+          nextTeeTime: nextSlot ? {
+            id: nextSlot.id,
+            startsAt: nextSlot.starts_at,
+            totalCapacity: nextSlot.capacity,
+            bookedCount: nextSlot.booked_count,
+            remainingSpots: Math.max(0, nextSlot.capacity - nextSlot.booked_count),
+            priceInCents: nextSlot.price_in_cents,
+          } : null,
+        };
+      })
+    );
+    return c.json({ data: coursesWithTeeTime });
+  }
+
+  return c.json({ data: data ?? [] });
 });
 
 // GET /courses/:id
@@ -62,7 +143,7 @@ router.get('/:id', standardRateLimit, async (c) => {
 
   if (error || !data) notFound('Course not found');
 
-  return c.json({ course: data });
+  return c.json({ data });
 });
 
 const courseCreateSchema = z.object({
@@ -87,6 +168,15 @@ router.post('/', standardRateLimit, authMiddleware, zValidator('json', courseCre
   const body = c.req.valid('json');
   const supabase = createAdminClient();
 
+  // Resolve Supabase auth ID to users.id
+  const { data: userProfile } = await supabase
+    .from('users')
+    .select('id')
+    .eq('supabase_user_id', user.id)
+    .single();
+
+  if (!userProfile) badRequest('User profile not found');
+
   const { data, error } = await supabase
     .from('courses')
     .insert({
@@ -103,14 +193,14 @@ router.post('/', standardRateLimit, authMiddleware, zValidator('json', courseCre
       website_url: body.websiteUrl,
       phone_number: body.phoneNumber,
       pricing_tier: body.pricingTier,
-      created_by_user_id: user.id,
+      created_by_user_id: userProfile.id,
     })
     .select()
     .single();
 
   if (error) badRequest(error.message);
 
-  return c.json({ course: data }, 201);
+  return c.json({ data }, 201);
 });
 
 const courseUpdateSchema = courseCreateSchema.partial();
@@ -122,12 +212,21 @@ router.patch('/:id', authMiddleware, zValidator('json', courseUpdateSchema), asy
   const body = c.req.valid('json');
   const supabase = createAdminClient();
 
+  // Resolve Supabase auth ID to users.id
+  const { data: userProfile } = await supabase
+    .from('users')
+    .select('id')
+    .eq('supabase_user_id', user.id)
+    .single();
+
+  if (!userProfile) badRequest('User profile not found');
+
   // Verify caller is staff for this course
   const { data: staffCheck } = await supabase
     .from('course_staff')
     .select('role')
     .eq('course_id', courseId)
-    .eq('user_id', user.id)
+    .eq('user_id', userProfile.id)
     .single();
 
   if (!staffCheck) forbidden('You are not a staff member of this course');
@@ -153,7 +252,7 @@ router.patch('/:id', authMiddleware, zValidator('json', courseUpdateSchema), asy
 
   if (error) badRequest(error.message);
 
-  return c.json({ course: data });
+  return c.json({ data });
 });
 
 const pricingTierSchema = z.object({
@@ -167,12 +266,21 @@ router.patch('/:id/pricing-tier', standardRateLimit, authMiddleware, zValidator(
   const { pricingTier } = c.req.valid('json');
   const supabase = createAdminClient();
 
+  // Resolve Supabase auth ID to users.id
+  const { data: userProfile } = await supabase
+    .from('users')
+    .select('id')
+    .eq('supabase_user_id', user.id)
+    .single();
+
+  if (!userProfile) badRequest('User profile not found');
+
   // Staff check — only owner/manager can change pricing tier
   const { data: staffCheck } = await supabase
     .from('course_staff')
     .select('role')
     .eq('course_id', courseId)
-    .eq('user_id', user.id)
+    .eq('user_id', userProfile.id)
     .single();
 
   if (!staffCheck || !['owner', 'manager'].includes(staffCheck.role)) {

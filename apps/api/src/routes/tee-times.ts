@@ -12,32 +12,47 @@ const router = new Hono();
 router.get('/', standardRateLimit, async (c) => {
   const { courseId, date, limit, offset } = c.req.query();
   if (!courseId) badRequest('courseId is required');
-  if (!date) badRequest('date is required');
 
   const supabase = createAdminClient();
-  const dayStart = new Date(`${date}T00:00:00Z`).toISOString();
-  const dayEnd = new Date(`${date}T23:59:59Z`).toISOString();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('tee_time_slots')
     .select('*')
     .eq('course_id', courseId)
-    .gte('starts_at', dayStart)
-    .lte('starts_at', dayEnd)
-    .order('starts_at')
+    .order('starts_at');
+
+  // If date is provided, filter to that day; otherwise get upcoming slots
+  if (date) {
+    const dayStart = new Date(`${date}T00:00:00Z`).toISOString();
+    const dayEnd = new Date(`${date}T23:59:59Z`).toISOString();
+    query = query
+      .gte('starts_at', dayStart)
+      .lte('starts_at', dayEnd);
+  } else {
+    // Get upcoming slots (starts_at > now)
+    const now = new Date().toISOString();
+    query = query.gt('starts_at', now);
+  }
+
+  query = query
     .limit(Number(limit) || 50)
     .range(Number(offset) || 0, (Number(offset) || 0) + (Number(limit) || 50) - 1);
 
+  const { data, error } = await query;
+
   if (error) badRequest(error.message);
 
-  const available = (data ?? []).filter((s) => s.booked_count < s.capacity);
+  // Transform response to match mobile expectations
+  const slots = (data ?? []).map((slot) => ({
+    id: slot.id,
+    startsAt: slot.starts_at,
+    totalCapacity: slot.capacity,
+    bookedCount: slot.booked_count,
+    remainingSpots: Math.max(0, slot.capacity - slot.booked_count),
+    priceInCents: slot.price_in_cents,
+  }));
 
-  return c.json({
-    slots: data ?? [],
-    available,
-    total: data?.length ?? 0,
-    availableCount: available.length,
-  });
+  return c.json({ data: slots });
 });
 
 // GET /tee-times/:id — single slot with availability
@@ -52,9 +67,15 @@ router.get('/:id', standardRateLimit, async (c) => {
   if (error || !data) notFound('Tee time slot not found');
 
   return c.json({
-    slot: data,
-    available: data.booked_count < data.capacity,
-    remainingSpots: Math.max(0, data.capacity - data.booked_count),
+    data: {
+      id: data.id,
+      startsAt: data.starts_at,
+      totalCapacity: data.capacity,
+      bookedCount: data.booked_count,
+      remainingSpots: Math.max(0, data.capacity - data.booked_count),
+      priceInCents: data.price_in_cents,
+      course: data.courses,
+    },
   });
 });
 
@@ -76,11 +97,20 @@ router.post(
     const body = c.req.valid('json');
     const supabase = createAdminClient();
 
+    // Resolve Supabase auth ID to users.id for staff check
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('id')
+      .eq('supabase_user_id', user.id)
+      .single();
+
+    if (!userProfile) badRequest('User profile not found');
+
     const { data: staffCheck } = await supabase
       .from('course_staff')
       .select('role')
       .eq('course_id', body.courseId)
-      .eq('user_id', user.id)
+      .eq('user_id', userProfile.id)
       .single();
 
     if (!staffCheck) {
@@ -100,7 +130,7 @@ router.post(
 
     if (error) badRequest(error.message);
 
-    return c.json({ slot: data }, 201);
+    return c.json({ data }, 201);
   }
 );
 

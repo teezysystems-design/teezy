@@ -1,12 +1,13 @@
 /**
- * Booking Confirmation Flow — Section 07
+ * Booking Flow — Streamlined 2-Step + Celebration
  *
  * Steps:
- *   1. Select players (1–4)
- *   2. Review & confirm (cost breakdown, T&C acknowledgement)
- *   3. Confirmation screen (booking ID, "Invite Friends" CTA)
+ *   1. Select Party Size (1–4 golfers, no pricing)
+ *   2. Confirm & Done (review + celebration view with animations)
+ *
+ * Golfers book tee times for FREE. The course gets billed monthly by PAR-Tee.
  */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,7 +17,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  useAnimatedValue,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
@@ -25,220 +25,301 @@ import { useAppStore } from '../../src/store/useAppStore';
 const API_URL = process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:4000';
 
 const C = {
-  primary: '#1a7f4b',
-  primaryLight: '#e8f5ee',
-  white: '#fff',
-  gray50: '#f7f7f7',
-  gray100: '#f0f0f0',
-  gray400: '#9ca3af',
-  gray600: '#6b7280',
+  primary: '#1B6B3A',
+  primaryLight: '#E8F5EE',
+  white: '#FFFFFF',
+  gray50: '#F7F7F7',
+  gray100: '#F0F0F0',
+  gray400: '#9CA3AF',
+  gray600: '#6B7280',
   gray900: '#111827',
-  border: '#e5e7eb',
-  green: '#22c55e',
-  red: '#ef4444',
+  border: '#E5E7EB',
 };
 
-type Step = 'players' | 'confirm' | 'done';
+type Step = 'select' | 'confirm' | 'celebration';
 
-// ─── Step 1: Select players ──────────────────────────────────────────────────
+// ─── Step 1: Select Party Size ───────────────────────────────────────────────
 
-function SelectPlayersStep({
-  playerCount,
+function SelectPartyStep({
+  partySize,
   maxPlayers,
+  courseName,
+  startsAt,
   onSelect,
-  onNext,
-  pricePerPersonCents,
+  onContinue,
 }: {
-  playerCount: number;
+  partySize: number;
   maxPlayers: number;
+  courseName: string;
+  startsAt: string;
   onSelect: (n: number) => void;
-  onNext: () => void;
-  pricePerPersonCents: number;
+  onContinue: () => void;
 }) {
   const maxAllowed = Math.min(maxPlayers, 4);
-  const total = (playerCount * pricePerPersonCents) / 100;
+  const dateStr = new Date(startsAt).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+  const timeStr = new Date(startsAt).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 
   return (
-    <View style={s.stepContainer}>
-      <Text style={s.stepHeading}>How many players?</Text>
-      <Text style={s.stepSub}>Select the number of golfers for this tee time.</Text>
-
-      <View style={s.playersGrid}>
-        {Array.from({ length: maxAllowed }, (_, i) => i + 1).map((n) => (
-          <TouchableOpacity
-            key={n}
-            style={[s.playerChip, playerCount === n && s.playerChipActive]}
-            onPress={() => onSelect(n)}
-            activeOpacity={0.75}
-          >
-            <Text style={[s.playerChipNum, playerCount === n && s.playerChipNumActive]}>{n}</Text>
-            <Text style={[s.playerChipLabel, playerCount === n && s.playerChipLabelActive]}>
-              {n === 1 ? 'player' : 'players'}
-            </Text>
-          </TouchableOpacity>
-        ))}
+    <ScrollView style={s.screen} contentContainerStyle={s.selectContent}>
+      {/* Header with course info */}
+      <View style={s.courseHeader}>
+        <TouchableOpacity onPress={() => {}} style={s.closeBtn}>
+          <Text style={s.closeBtnText}>×</Text>
+        </TouchableOpacity>
+        <View style={s.courseInfo}>
+          <Text style={s.courseName}>{courseName}</Text>
+          <Text style={s.courseDateTime}>
+            {dateStr} at {timeStr}
+          </Text>
+        </View>
       </View>
 
-      <View style={s.totalRow}>
-        <Text style={s.totalLabel}>Total</Text>
-        <Text style={s.totalAmount}>${total.toFixed(2)}</Text>
-      </View>
-      <Text style={s.totalSub}>${(pricePerPersonCents / 100).toFixed(2)}/person × {playerCount}</Text>
+      {/* Party size selection */}
+      <View style={s.selectContainer}>
+        <Text style={s.selectHeading}>How many players?</Text>
+        <Text style={s.selectSub}>
+          Choose the number of golfers in your party.
+        </Text>
 
-      <TouchableOpacity style={s.primaryBtn} onPress={onNext} activeOpacity={0.85}>
-        <Text style={s.primaryBtnText}>Continue →</Text>
-      </TouchableOpacity>
-    </View>
+        <View style={s.partyGrid}>
+          {Array.from({ length: maxAllowed }, (_, i) => i + 1).map((n) => (
+            <TouchableOpacity
+              key={n}
+              style={[s.partyChip, partySize === n && s.partyChipActive]}
+              onPress={() => onSelect(n)}
+              activeOpacity={0.75}
+            >
+              <Text
+                style={[s.partyChipNum, partySize === n && s.partyChipNumActive]}
+              >
+                {n}
+              </Text>
+              <Text
+                style={[
+                  s.partyChipLabel,
+                  partySize === n && s.partyChipLabelActive,
+                ]}
+              >
+                {n === 1 ? 'golfer' : 'golfers'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {/* Continue button */}
+      <View style={s.selectFooter}>
+        <TouchableOpacity style={s.primaryBtn} onPress={onContinue} activeOpacity={0.85}>
+          <Text style={s.primaryBtnText}>Continue</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
   );
 }
 
-// ─── Step 2: Review & confirm ────────────────────────────────────────────────
+// ─── Step 2: Confirm Booking ─────────────────────────────────────────────────
 
 function ConfirmStep({
+  partySize,
   courseName,
   startsAt,
-  playerCount,
-  pricePerPersonCents,
   onBack,
   onConfirm,
   loading,
 }: {
+  partySize: number;
   courseName: string;
   startsAt: string;
-  playerCount: number;
-  pricePerPersonCents: number;
   onBack: () => void;
   onConfirm: () => void;
   loading: boolean;
 }) {
-  const [agreed, setAgreed] = useState(false);
+  const [policyAgreed, setPolicyAgreed] = useState(false);
+
   const dateStr = new Date(startsAt).toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
   });
   const timeStr = new Date(startsAt).toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit',
   });
-  const subtotal = (playerCount * pricePerPersonCents) / 100;
-  const tax = subtotal * 0.1;
-  const total = subtotal + tax;
 
   return (
-    <View style={s.stepContainer}>
-      <Text style={s.stepHeading}>Review booking</Text>
+    <ScrollView style={s.screen} contentContainerStyle={s.confirmContent}>
+      <View style={s.confirmContainer}>
+        {/* Header */}
+        <TouchableOpacity onPress={onBack} style={s.backBtn}>
+          <Text style={s.backBtnText}>← Change party size</Text>
+        </TouchableOpacity>
 
-      <View style={s.reviewCard}>
-        <Text style={s.reviewCourseName}>{courseName}</Text>
-        <Text style={s.reviewDateTime}>{dateStr}</Text>
-        <Text style={s.reviewDateTime}>{timeStr}</Text>
+        {/* Review card */}
+        <View style={s.reviewCard}>
+          <Text style={s.reviewHeading}>Your booking</Text>
 
-        <View style={s.divider} />
+          <View style={s.reviewRow}>
+            <Text style={s.reviewLabel}>Course</Text>
+            <Text style={s.reviewValue}>{courseName}</Text>
+          </View>
 
-        <View style={s.lineRow}>
-          <Text style={s.lineLabel}>{playerCount} player{playerCount !== 1 ? 's' : ''} × ${(pricePerPersonCents / 100).toFixed(2)}</Text>
-          <Text style={s.lineValue}>${subtotal.toFixed(2)}</Text>
+          <View style={s.reviewRow}>
+            <Text style={s.reviewLabel}>Date & Time</Text>
+            <Text style={s.reviewValue}>
+              {dateStr} at {timeStr}
+            </Text>
+          </View>
+
+          <View style={s.reviewRow}>
+            <Text style={s.reviewLabel}>Party Size</Text>
+            <Text style={s.reviewValue}>
+              {partySize} {partySize === 1 ? 'golfer' : 'golfers'}
+            </Text>
+          </View>
         </View>
-        <View style={s.lineRow}>
-          <Text style={s.lineLabel}>Tax & fees (10%)</Text>
-          <Text style={s.lineValue}>${tax.toFixed(2)}</Text>
-        </View>
 
-        <View style={s.divider} />
+        {/* Policy checkbox */}
+        <TouchableOpacity
+          style={s.policyRow}
+          onPress={() => setPolicyAgreed(!policyAgreed)}
+          activeOpacity={0.7}
+        >
+          <View style={[s.checkbox, policyAgreed && s.checkboxChecked]}>
+            {policyAgreed && <Text style={s.checkmark}>✓</Text>}
+          </View>
+          <Text style={s.policyText}>
+            I understand the course's cancellation policy
+          </Text>
+        </TouchableOpacity>
 
-        <View style={s.lineRow}>
-          <Text style={[s.lineLabel, s.totalLineLabel]}>Total</Text>
-          <Text style={[s.lineValue, s.totalLineValue]}>${total.toFixed(2)}</Text>
-        </View>
+        {/* Confirm button */}
+        <TouchableOpacity
+          style={[s.primaryBtn, (!policyAgreed || loading) && s.primaryBtnDisabled]}
+          onPress={onConfirm}
+          disabled={!policyAgreed || loading}
+          activeOpacity={0.85}
+        >
+          {loading ? (
+            <ActivityIndicator color={C.white} />
+          ) : (
+            <Text style={s.primaryBtnText}>Confirm Booking</Text>
+          )}
+        </TouchableOpacity>
       </View>
+    </ScrollView>
+  );
+}
 
-      {/* T&C toggle */}
-      <TouchableOpacity style={s.tcRow} onPress={() => setAgreed(!agreed)} activeOpacity={0.7}>
-        <View style={[s.checkbox, agreed && s.checkboxChecked]}>
-          {agreed && <Text style={s.checkmark}>✓</Text>}
-        </View>
-        <Text style={s.tcText}>
-          I agree to the cancellation policy and terms of service.
-        </Text>
-      </TouchableOpacity>
+// ─── Step 3: Celebration ─────────────────────────────────────────────────────
 
-      <TouchableOpacity
-        style={[s.primaryBtn, (!agreed || loading) && s.primaryBtnDisabled]}
-        onPress={onConfirm}
-        disabled={!agreed || loading}
-        activeOpacity={0.85}
+function CelebrationStep({
+  bookingId,
+  partySize,
+  courseName,
+  startsAt,
+  onInviteFriends,
+  onDiscover,
+}: {
+  bookingId: string;
+  partySize: number;
+  courseName: string;
+  startsAt: string;
+  onInviteFriends: () => void;
+  onDiscover: () => void;
+}) {
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 40,
+        friction: 7,
+      }),
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [scaleAnim, fadeAnim]);
+
+  const dateStr = new Date(startsAt).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+  const timeStr = new Date(startsAt).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  return (
+    <View style={s.celebrationContainer}>
+      {/* Animated checkmark */}
+      <Animated.View
+        style={[
+          s.checkmarkContainer,
+          { transform: [{ scale: scaleAnim }], opacity: fadeAnim },
+        ]}
       >
-        {loading
-          ? <ActivityIndicator color={C.white} />
-          : <Text style={s.primaryBtnText}>Confirm & Pay ${total.toFixed(2)}</Text>}
-      </TouchableOpacity>
+        <Text style={s.checkmarkEmoji}>✓</Text>
+      </Animated.View>
 
-      <TouchableOpacity style={s.textBtn} onPress={onBack}>
-        <Text style={s.textBtnText}>← Change players</Text>
-      </TouchableOpacity>
+      {/* Success heading */}
+      <Animated.View style={{ opacity: fadeAnim }}>
+        <Text style={s.celebrationHeading}>You're booked!</Text>
+
+        {/* Booking details */}
+        <View style={s.celebrationDetails}>
+          <Text style={s.detailCourse}>{courseName}</Text>
+          <Text style={s.detailDateTime}>
+            {dateStr} at {timeStr}
+          </Text>
+          <Text style={s.detailParty}>
+            {partySize} {partySize === 1 ? 'golfer' : 'golfers'}
+          </Text>
+
+          {/* Booking reference */}
+          <View style={s.refCard}>
+            <Text style={s.refLabel}>Booking reference</Text>
+            <Text style={s.refId}>{bookingId.slice(0, 8).toUpperCase()}</Text>
+          </View>
+        </View>
+
+        {/* Action buttons */}
+        <View style={s.celebrationActions}>
+          <TouchableOpacity
+            style={s.primaryBtn}
+            onPress={onInviteFriends}
+            activeOpacity={0.85}
+          >
+            <Text style={s.primaryBtnText}>Invite Friends to Party</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={s.secondaryBtn}
+            onPress={onDiscover}
+            activeOpacity={0.75}
+          >
+            <Text style={s.secondaryBtnText}>Back to Discover</Text>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
     </View>
   );
 }
 
-// ─── Step 3: Confirmation ────────────────────────────────────────────────────
-
-function DoneStep({
-  bookingId,
-  courseName,
-  startsAt,
-  playerCount,
-  onInviteFriends,
-  onHome,
-}: {
-  bookingId: string;
-  courseName: string;
-  startsAt: string;
-  playerCount: number;
-  onInviteFriends: () => void;
-  onHome: () => void;
-}) {
-  const fadeAnim = useAnimatedValue(0);
-
-  React.useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 600,
-      useNativeDriver: true,
-    }).start();
-  }, [fadeAnim]);
-
-  const timeStr = new Date(startsAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  const dateStr = new Date(startsAt).toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric',
-  });
-
-  return (
-    <Animated.View style={[s.doneContainer, { opacity: fadeAnim }]}>
-      <View style={s.successIcon}>
-        <Text style={s.successEmoji}>✅</Text>
-      </View>
-      <Text style={s.doneTitle}>Booking confirmed!</Text>
-      <Text style={s.doneSub}>
-        You're all set for {playerCount} player{playerCount !== 1 ? 's' : ''} at
-      </Text>
-      <Text style={s.doneCourseName}>{courseName}</Text>
-      <Text style={s.doneDateTime}>{dateStr} · {timeStr}</Text>
-
-      <View style={s.bookingIdCard}>
-        <Text style={s.bookingIdLabel}>Booking reference</Text>
-        <Text style={s.bookingIdText}>{bookingId.slice(0, 8).toUpperCase()}</Text>
-      </View>
-
-      <TouchableOpacity style={s.primaryBtn} onPress={onInviteFriends} activeOpacity={0.85}>
-        <Text style={s.primaryBtnText}>👥 Invite Friends</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={s.textBtn} onPress={onHome}>
-        <Text style={s.textBtnText}>Back to Discover</Text>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-}
-
-// ─── Main flow ────────────────────────────────────────────────────────────────
+// ─── Main Screen ─────────────────────────────────────────────────────────────
 
 export default function BookingScreen() {
   const { teeTimeId } = useLocalSearchParams<{ teeTimeId: string }>();
@@ -246,8 +327,8 @@ export default function BookingScreen() {
   const router = useRouter();
   const { pendingBooking, clearPendingBooking } = useAppStore();
 
-  const [step, setStep] = useState<Step>('players');
-  const [playerCount, setPlayerCount] = useState(2);
+  const [step, setStep] = useState<Step>('select');
+  const [partySize, setPartySize] = useState(1);
   const [confirming, setConfirming] = useState(false);
   const [bookingId, setBookingId] = useState<string | null>(null);
 
@@ -276,7 +357,7 @@ export default function BookingScreen() {
         },
         body: JSON.stringify({
           teeTimeId: booking.teeTimeId,
-          playerCount,
+          partySize,
         }),
       });
 
@@ -287,9 +368,12 @@ export default function BookingScreen() {
 
       const json = await res.json();
       setBookingId(json.data?.id ?? json.id ?? 'unknown');
-      setStep('done');
+      setStep('celebration');
     } catch (err: unknown) {
-      Alert.alert('Booking failed', err instanceof Error ? err.message : 'Please try again.');
+      Alert.alert(
+        'Booking failed',
+        err instanceof Error ? err.message : 'Please try again.'
+      );
     } finally {
       setConfirming(false);
     }
@@ -304,158 +388,254 @@ export default function BookingScreen() {
     }
   };
 
-  const handleHome = () => {
+  const handleDiscover = () => {
     clearPendingBooking();
-    router.replace('/');
+    router.replace('/(tabs)');
   };
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.content}>
-      {/* Header */}
-      {step !== 'done' && (
-        <View style={s.header}>
-          <TouchableOpacity onPress={() => (step === 'confirm' ? setStep('players') : router.back())}>
-            <Text style={s.backArrow}>←</Text>
-          </TouchableOpacity>
-          <Text style={s.headerTitle}>
-            {step === 'players' ? 'Select Players' : 'Confirm Booking'}
-          </Text>
-          <View style={s.stepIndicator}>
-            <View style={[s.stepDot, step === 'players' ? s.stepDotActive : s.stepDotDone]} />
-            <View style={[s.stepLine, step === 'confirm' && s.stepLineDone]} />
-            <View style={[s.stepDot, step === 'confirm' && s.stepDotActive]} />
-          </View>
-        </View>
-      )}
-
-      {step === 'players' && (
-        <SelectPlayersStep
-          playerCount={playerCount}
+    <>
+      {step === 'select' && (
+        <SelectPartyStep
+          partySize={partySize}
           maxPlayers={booking.maxPlayers}
-          onSelect={setPlayerCount}
-          onNext={() => setStep('confirm')}
-          pricePerPersonCents={booking.pricePerPersonCents}
+          courseName={booking.courseName}
+          startsAt={booking.startsAt}
+          onSelect={setPartySize}
+          onContinue={() => setStep('confirm')}
         />
       )}
 
       {step === 'confirm' && (
         <ConfirmStep
+          partySize={partySize}
           courseName={booking.courseName}
           startsAt={booking.startsAt}
-          playerCount={playerCount}
-          pricePerPersonCents={booking.pricePerPersonCents}
-          onBack={() => setStep('players')}
+          onBack={() => setStep('select')}
           onConfirm={handleConfirm}
           loading={confirming}
         />
       )}
 
-      {step === 'done' && bookingId && (
-        <DoneStep
+      {step === 'celebration' && bookingId && (
+        <CelebrationStep
           bookingId={bookingId}
+          partySize={partySize}
           courseName={booking.courseName}
           startsAt={booking.startsAt}
-          playerCount={playerCount}
           onInviteFriends={handleInviteFriends}
-          onHome={handleHome}
+          onDiscover={handleDiscover}
         />
       )}
-    </ScrollView>
+    </>
   );
 }
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.white },
-  content: { flexGrow: 1, paddingBottom: 48 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 },
+  selectContent: { flexGrow: 1, paddingBottom: 32 },
+  confirmContent: { flexGrow: 1, paddingBottom: 32 },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 16,
+  },
   errorText: { fontSize: 16, color: C.gray400 },
 
-  header: {
+  // Select step
+  courseHeader: {
     paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    paddingTop: 16,
+    paddingBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 12,
   },
-  backArrow: { fontSize: 22, color: C.primary },
-  headerTitle: { fontSize: 20, fontWeight: '800', color: C.gray900 },
-  stepIndicator: { flexDirection: 'row', alignItems: 'center', gap: 0 },
-  stepDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.border },
-  stepDotActive: { backgroundColor: C.primary },
-  stepDotDone: { backgroundColor: C.green },
-  stepLine: { flex: 1, height: 2, backgroundColor: C.border },
-  stepLineDone: { backgroundColor: C.green },
+  closeBtn: { paddingVertical: 4, paddingHorizontal: 8 },
+  closeBtnText: { fontSize: 28, color: C.gray600 },
+  courseInfo: { flex: 1 },
+  courseName: { fontSize: 18, fontWeight: '800', color: C.gray900 },
+  courseDateTime: { fontSize: 14, color: C.gray600, marginTop: 4 },
 
-  stepContainer: { padding: 24, gap: 0 },
-  stepHeading: { fontSize: 24, fontWeight: '800', color: C.gray900, marginBottom: 8 },
-  stepSub: { fontSize: 14, color: C.gray600, marginBottom: 28 },
-
-  playersGrid: { flexDirection: 'row', gap: 12, marginBottom: 28, flexWrap: 'wrap' },
-  playerChip: {
-    width: 80, height: 80, borderRadius: 20, borderWidth: 2, borderColor: C.border,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: C.white,
+  selectContainer: { paddingHorizontal: 20, gap: 12 },
+  selectHeading: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: C.gray900,
+    marginBottom: 8,
   },
-  playerChipActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
-  playerChipNum: { fontSize: 28, fontWeight: '800', color: C.gray400 },
-  playerChipNumActive: { color: C.primary },
-  playerChipLabel: { fontSize: 11, color: C.gray400, marginTop: 2 },
-  playerChipLabelActive: { color: C.primary },
+  selectSub: { fontSize: 15, color: C.gray600, lineHeight: 22, marginBottom: 24 },
 
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 },
-  totalLabel: { fontSize: 16, fontWeight: '700', color: C.gray900 },
-  totalAmount: { fontSize: 28, fontWeight: '900', color: C.primary },
-  totalSub: { fontSize: 13, color: C.gray400, marginBottom: 28 },
+  partyGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'center',
+    marginBottom: 40,
+  },
+  partyChip: {
+    width: 88,
+    height: 88,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.white,
+  },
+  partyChipActive: {
+    borderColor: C.primary,
+    backgroundColor: C.primaryLight,
+  },
+  partyChipNum: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: C.gray400,
+  },
+  partyChipNumActive: { color: C.primary },
+  partyChipLabel: { fontSize: 12, color: C.gray400, marginTop: 4, fontWeight: '600' },
+  partyChipLabelActive: { color: C.primary },
+
+  selectFooter: { paddingHorizontal: 20 },
+
+  // Confirm step
+  confirmContainer: { paddingHorizontal: 20, paddingTop: 16 },
+  backBtn: { marginBottom: 24 },
+  backBtnText: { fontSize: 15, color: C.primary, fontWeight: '600' },
 
   reviewCard: {
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: C.border,
-    borderRadius: 16,
+    borderRadius: 14,
     padding: 20,
-    marginBottom: 20,
-    gap: 8,
+    marginBottom: 24,
+    backgroundColor: C.gray50,
   },
-  reviewCourseName: { fontSize: 18, fontWeight: '800', color: C.gray900 },
-  reviewDateTime: { fontSize: 14, color: C.gray600 },
-  divider: { height: 1, backgroundColor: C.border, marginVertical: 4 },
-  lineRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  lineLabel: { fontSize: 14, color: C.gray600 },
-  lineValue: { fontSize: 14, color: C.gray900, fontWeight: '600' },
-  totalLineLabel: { fontWeight: '800', color: C.gray900, fontSize: 16 },
-  totalLineValue: { fontWeight: '800', color: C.primary, fontSize: 18 },
+  reviewHeading: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: C.gray900,
+    marginBottom: 16,
+  },
+  reviewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  reviewLabel: { fontSize: 14, color: C.gray600 },
+  reviewValue: { fontSize: 14, fontWeight: '600', color: C.gray900, flex: 1, textAlign: 'right' },
 
-  tcRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 24 },
+  policyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 28,
+  },
   checkbox: {
-    width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: C.border,
-    alignItems: 'center', justifyContent: 'center', marginTop: 2,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
   },
   checkboxChecked: { backgroundColor: C.primary, borderColor: C.primary },
-  checkmark: { color: C.white, fontSize: 13, fontWeight: '800' },
-  tcText: { flex: 1, fontSize: 13, color: C.gray600, lineHeight: 18 },
+  checkmark: { color: C.white, fontSize: 14, fontWeight: '800' },
+  policyText: { flex: 1, fontSize: 14, color: C.gray600, lineHeight: 20, fontWeight: '500' },
 
+  // Buttons
   primaryBtn: {
-    backgroundColor: C.primary, paddingVertical: 16, borderRadius: 14,
-    alignItems: 'center', marginBottom: 12,
+    backgroundColor: C.primary,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  primaryBtnDisabled: { opacity: 0.4 },
-  primaryBtnText: { color: C.white, fontSize: 16, fontWeight: '700' },
-  textBtn: { alignItems: 'center', paddingVertical: 8 },
-  textBtnText: { color: C.primary, fontSize: 15 },
+  primaryBtnDisabled: { opacity: 0.5 },
+  primaryBtnText: { color: C.white, fontSize: 16, fontWeight: '600' },
 
-  // Done step
-  doneContainer: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8,
+  secondaryBtn: {
+    backgroundColor: C.white,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.border,
   },
-  successIcon: { marginBottom: 8 },
-  successEmoji: { fontSize: 72 },
-  doneTitle: { fontSize: 28, fontWeight: '900', color: C.gray900, textAlign: 'center' },
-  doneSub: { fontSize: 15, color: C.gray600, textAlign: 'center' },
-  doneCourseName: { fontSize: 18, fontWeight: '800', color: C.primary, textAlign: 'center' },
-  doneDateTime: { fontSize: 14, color: C.gray600, marginBottom: 16 },
-  bookingIdCard: {
-    backgroundColor: C.gray50, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 14,
-    alignItems: 'center', marginBottom: 24, borderWidth: 1, borderColor: C.border,
+  secondaryBtnText: { color: C.primary, fontSize: 16, fontWeight: '600' },
+
+  // Celebration
+  celebrationContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 48,
+    backgroundColor: C.white,
   },
-  bookingIdLabel: { fontSize: 11, color: C.gray400, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
-  bookingIdText: { fontSize: 22, fontWeight: '900', color: C.gray900, letterSpacing: 3, marginTop: 4 },
+  checkmarkContainer: {
+    marginBottom: 32,
+  },
+  checkmarkEmoji: {
+    fontSize: 72,
+    color: C.primary,
+  },
+
+  celebrationHeading: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: C.gray900,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+
+  celebrationDetails: {
+    alignItems: 'center',
+    marginBottom: 32,
+    gap: 8,
+  },
+  detailCourse: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: C.gray900,
+  },
+  detailDateTime: {
+    fontSize: 14,
+    color: C.gray600,
+  },
+  detailParty: {
+    fontSize: 14,
+    color: C.gray600,
+    marginBottom: 12,
+  },
+
+  refCard: {
+    backgroundColor: C.primaryLight,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  refLabel: {
+    fontSize: 11,
+    color: C.primary,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  refId: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.primary,
+    letterSpacing: 2,
+    marginTop: 4,
+  },
+
+  celebrationActions: {
+    width: '100%',
+  },
 });

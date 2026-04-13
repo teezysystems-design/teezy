@@ -2,8 +2,7 @@
  * Discover Screen — Sections 07 + 19
  *
  * - Map / list view toggle
- * - Mood tag multi-select filter bar
- * - AI Mood Matching: free-text input → Claude structured extraction → filtered courses
+ * - Mood tag multi-select filter bar (tag-based filtering only)
  * - Course cards: name, city, distance, mood tags, next available tee time
  * - Navigates to /course/[courseId] for full detail + booking
  */
@@ -17,41 +16,26 @@ import {
   RefreshControl,
   ActivityIndicator,
   Platform,
-  TextInput,
   Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { MOODS, COLORS } from '@par-tee/shared';
 import { useAuth } from '../../src/context/AuthContext';
 import { useAppStore } from '../../src/store/useAppStore';
 
 const API_URL = process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:4000';
 
 const C = {
-  primary: '#1a7f4b',
-  primaryLight: '#e8f5ee',
-  white: '#fff',
-  gray50: '#f7f7f7',
-  gray100: '#efefef',
-  gray400: '#aaa',
-  gray600: '#666',
-  gray900: '#111',
-  border: '#e0e0e0',
-};
-
-const MOODS = [
-  { key: 'all' as const,         label: '✨ All' },
-  { key: 'relaxed' as const,     label: '😌 Relaxed' },
-  { key: 'competitive' as const, label: '🏆 Competitive' },
-  { key: 'social' as const,      label: '👥 Social' },
-  { key: 'scenic' as const,      label: '🌅 Scenic' },
-  { key: 'beginner' as const,    label: '🌱 Beginner' },
-  { key: 'fast-paced' as const,  label: '⚡ Fast' },
-  { key: 'challenging' as const, label: '💪 Challenging' },
-];
-
-const MOOD_EMOJI: Record<string, string> = {
-  relaxed: '😌', competitive: '🏆', social: '👥', scenic: '🌅',
-  beginner: '🌱', 'fast-paced': '⚡', challenging: '💪', advanced: '🔥',
+  primary: COLORS.primary,
+  primaryLight: COLORS.primaryPale,
+  white: COLORS.white,
+  gray50: COLORS.gray50,
+  gray100: COLORS.gray100,
+  gray400: COLORS.gray400,
+  gray600: COLORS.gray500,
+  gray900: COLORS.gray900,
+  border: COLORS.gray200,
+  amber: COLORS.warning,
 };
 
 interface CourseCard {
@@ -65,8 +49,6 @@ interface CourseCard {
   par: number;
   nextTeeTime: string | null;
   nextTeeTimeId: string | null;
-  pricePerPersonCents: number | null;
-  moodMatchScore: number | null;
   latitude: number | null;
   longitude: number | null;
 }
@@ -79,9 +61,6 @@ function CourseListCard({ course, onPress }: { course: CourseCard; onPress: () =
     : null;
   const nextDate = course.nextTeeTime
     ? new Date(course.nextTeeTime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-    : null;
-  const price = course.pricePerPersonCents
-    ? `$${(course.pricePerPersonCents / 100).toFixed(0)}/person`
     : null;
 
   return (
@@ -98,23 +77,16 @@ function CourseListCard({ course, onPress }: { course: CourseCard; onPress: () =
         )}
       </View>
 
-      {course.moodMatchScore != null && course.moodMatchScore > 0 && (
-        <View style={s.moodMatchRow}>
-          <Text style={s.moodMatchLabel}>Mood match</Text>
-          <View style={s.moodMatchTrack}>
-            <View style={[s.moodMatchFill, { width: `${Math.min(100, course.moodMatchScore)}%` as `${number}%` }]} />
-          </View>
-          <Text style={s.moodMatchPct}>{Math.round(course.moodMatchScore)}%</Text>
-        </View>
-      )}
-
       {course.moodTags.length > 0 && (
         <View style={s.tagsRow}>
-          {course.moodTags.slice(0, 4).map((tag) => (
-            <View key={tag} style={s.tag}>
-              <Text style={s.tagText}>{MOOD_EMOJI[tag] ?? '⛳'} {tag}</Text>
-            </View>
-          ))}
+          {course.moodTags.slice(0, 4).map((tag) => {
+            const moodObj = MOODS.find((m) => m.key === tag);
+            return (
+              <View key={tag} style={s.tag}>
+                <Text style={s.tagText}>{moodObj?.emoji ?? '⛳'} {tag}</Text>
+              </View>
+            );
+          })}
         </View>
       )}
 
@@ -129,11 +101,6 @@ function CourseListCard({ course, onPress }: { course: CourseCard; onPress: () =
             <Text style={s.noTimesText}>No upcoming tee times</Text>
           )}
         </View>
-        {price && nextTime && (
-          <View style={s.pricePill}>
-            <Text style={s.priceText}>{price}</Text>
-          </View>
-        )}
       </View>
     </TouchableOpacity>
   );
@@ -207,16 +174,11 @@ export default function DiscoverScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // AI Mood Matching (Section 19)
-  const [moodQuery, setMoodQuery] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiActive, setAiActive] = useState(false);
-  const inputRef = useRef<TextInput>(null);
-
   const fetchCourses = useCallback(
     async (silent = false) => {
       if (!session) return;
       if (!silent) setLoading(true);
+      Keyboard.dismiss();
       try {
         const moodParam = selectedMood === 'all' ? '' : `&mood=${selectedMood}`;
         const res = await fetch(`${API_URL}/v1/courses?includeNextTeeTime=true${moodParam}`, {
@@ -235,42 +197,16 @@ export default function DiscoverScreen() {
     [session, selectedMood]
   );
 
-  const handleAiSearch = useCallback(async () => {
-    if (!session?.access_token || !moodQuery.trim()) return;
-    Keyboard.dismiss();
-    setAiLoading(true);
-    setAiActive(true);
-    try {
-      const res = await fetch(`${API_URL}/v1/ai-matching/mood`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ prompt: moodQuery.trim() }),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        // ai-matching returns { courses: [...], reasoning: string }
-        setCourses(json.courses ?? []);
-      }
-    } catch {
-      // Keep existing results on error
-    } finally {
-      setAiLoading(false);
-    }
-  }, [session?.access_token, moodQuery]);
-
-  const clearAiSearch = useCallback(() => {
-    setMoodQuery('');
-    setAiActive(false);
-    fetchCourses();
-  }, [fetchCourses]);
-
   useEffect(() => { fetchCourses(); }, [fetchCourses]);
 
   const onRefresh = () => { setRefreshing(true); fetchCourses(true); };
   const handleCoursePress = (course: CourseCard) => router.push(`/course/${course.id}`);
+
+  // Mood chips: "All" + all 12 moods
+  const moodChips = [
+    { key: 'all' as const, label: '✨ All' },
+    ...MOODS.map((m) => ({ key: m.key, label: `${m.emoji} ${m.label}` })),
+  ];
 
   return (
     <View style={s.screen}>
@@ -296,51 +232,12 @@ export default function DiscoverScreen() {
         </View>
       </View>
 
-      {/* AI Mood Matching (Section 19) */}
-      <View style={s.aiBar}>
-        <View style={[s.aiInputWrap, aiActive && s.aiInputWrapActive]}>
-          <Text style={s.aiIcon}>✨</Text>
-          <TextInput
-            ref={inputRef}
-            style={s.aiInput}
-            placeholder="Tell me what kind of round you want…"
-            placeholderTextColor={C.gray400}
-            value={moodQuery}
-            onChangeText={setMoodQuery}
-            onSubmitEditing={handleAiSearch}
-            returnKeyType="search"
-            autoCorrect={false}
-            editable={!aiLoading}
-          />
-          {aiActive ? (
-            <TouchableOpacity onPress={clearAiSearch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={s.aiClear}>✕</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              onPress={handleAiSearch}
-              disabled={!moodQuery.trim() || aiLoading}
-              style={[s.aiSearchBtn, (!moodQuery.trim() || aiLoading) && { opacity: 0.4 }]}
-            >
-              {aiLoading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={s.aiSearchBtnText}>Go</Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </View>
-        {aiActive && !aiLoading && (
-          <Text style={s.aiActiveLabel}>✨ AI-matched results</Text>
-        )}
-      </View>
-
       {/* Mood filter */}
       <View style={s.filterBar}>
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
-          data={MOODS}
+          data={moodChips}
           keyExtractor={(item) => item.key}
           contentContainerStyle={s.filterList}
           renderItem={({ item }) => {
@@ -348,7 +245,7 @@ export default function DiscoverScreen() {
             return (
               <TouchableOpacity
                 style={[s.chip, active && s.chipActive]}
-                onPress={() => setSelectedMood(item.key)}
+                onPress={() => setSelectedMood(item.key as any)}
                 activeOpacity={0.7}
               >
                 <Text style={[s.chipText, active && s.chipTextActive]}>{item.label}</Text>
@@ -373,7 +270,7 @@ export default function DiscoverScreen() {
               : 'Try a different mood to see more options.'}
           </Text>
           {selectedMood !== 'all' && (
-            <TouchableOpacity style={s.clearBtn} onPress={() => setSelectedMood('all')}>
+            <TouchableOpacity style={s.clearBtn} onPress={() => setSelectedMood('all' as any)}>
               <Text style={s.clearBtnText}>Show all courses</Text>
             </TouchableOpacity>
           )}
@@ -420,41 +317,6 @@ const s = StyleSheet.create({
   toggleBtnText: { fontSize: 13, color: C.gray600, fontWeight: '600' },
   toggleBtnTextActive: { color: C.white },
 
-  // AI Mood Matching bar
-  aiBar: {
-    backgroundColor: C.white,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-    gap: 6,
-  },
-  aiInputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.gray50,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: C.border,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  aiInputWrapActive: { borderColor: C.primary },
-  aiIcon: { fontSize: 16 },
-  aiInput: { flex: 1, fontSize: 14, color: C.gray900 },
-  aiClear: { fontSize: 16, color: C.gray400, fontWeight: '600', paddingLeft: 4 },
-  aiSearchBtn: {
-    backgroundColor: C.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 8,
-    minWidth: 42,
-    alignItems: 'center',
-  },
-  aiSearchBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  aiActiveLabel: { fontSize: 12, color: C.primary, fontWeight: '600', paddingLeft: 4 },
-
   filterBar: { backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.border },
   filterList: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
   chip: {
@@ -463,7 +325,7 @@ const s = StyleSheet.create({
   },
   chipActive: { backgroundColor: C.primary, borderColor: C.primary },
   chipText: { fontSize: 13, color: C.gray600, fontWeight: '500' },
-  chipTextActive: { color: '#fff', fontWeight: '600' },
+  chipTextActive: { color: C.white, fontWeight: '600' },
 
   list: { padding: 16 },
 
@@ -475,12 +337,6 @@ const s = StyleSheet.create({
   distancePill: { backgroundColor: C.gray100, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   distanceText: { fontSize: 12, color: C.gray600, fontWeight: '600' },
 
-  moodMatchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  moodMatchLabel: { fontSize: 11, color: C.gray400, fontWeight: '600', width: 72 },
-  moodMatchTrack: { flex: 1, height: 5, borderRadius: 3, backgroundColor: C.gray100, overflow: 'hidden' },
-  moodMatchFill: { height: '100%', backgroundColor: C.primary, borderRadius: 3 },
-  moodMatchPct: { fontSize: 11, color: C.primary, fontWeight: '700', width: 32, textAlign: 'right' },
-
   tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
   tag: { backgroundColor: C.gray100, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   tagText: { fontSize: 11, color: C.gray600, textTransform: 'capitalize' },
@@ -490,8 +346,6 @@ const s = StyleSheet.create({
   nextTimeLabel: { fontSize: 11, color: C.gray400, fontWeight: '600', marginBottom: 2 },
   nextTimeText: { fontSize: 13, color: C.gray900, fontWeight: '600' },
   noTimesText: { fontSize: 13, color: C.gray400 },
-  pricePill: { backgroundColor: C.primaryLight, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
-  priceText: { fontSize: 13, fontWeight: '700', color: C.primary },
 
   map: { flex: 1 },
   mapPin: {
