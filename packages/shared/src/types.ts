@@ -10,16 +10,24 @@ export type Mood =
   | 'fast-paced'
   | 'social'
   | 'scenic'
-  | 'challenging';
+  | 'challenging'
+  | 'family_friendly'
+  | 'walkable'
+  | 'night_golf'
+  | 'practice_facility';
 
 export interface User {
   id: string;
   email: string;
   name: string;
+  username: string | null;
+  displayName: string | null;
   avatarUrl: string | null;
   bio: string | null;
+  accountType: 'golfer' | 'course_admin';
   isPrivate: boolean;
   handicap: number | null;
+  homeCourseId: string | null;
   moodPreferences: Mood[];
   location: GeoPoint | null;
   createdAt: Date;
@@ -99,7 +107,7 @@ export interface TeeTimeSlot {
 }
 
 export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed';
-export type PaymentStatus = 'pending' | 'paid' | 'refunded' | 'failed';
+export type GameMode = 'solo' | 'match_1v1' | 'match_2v2' | 'tournament' | 'casual';
 
 export interface Booking {
   id: string;
@@ -107,10 +115,13 @@ export interface Booking {
   slotId: string;
   courseId: string;
   status: BookingStatus;
-  paymentStatus: PaymentStatus;
+  roundMode: GameMode | null;
   partySize: number;
-  totalPriceInCents: number;
-  stripePaymentIntentId: string | null;
+  bookingFeeCents: number;
+  billedAt: Date | null;
+  checkedInAt: Date | null;
+  noShow: boolean;
+  notes: string | null;
   cancelledAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -143,9 +154,13 @@ export interface Round {
   courseId: string;
   bookingId: string | null;
   playedAt: Date;
+  mode: GameMode | null;
   scoreCard: HoleScore[];
   totalScore: number | null;
+  scoreDifferential: number | null;
+  verified: boolean;
   moodRating: number | null;
+  completedAt: Date | null;
   isShared: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -155,6 +170,9 @@ export interface HoleScore {
   hole: number;
   par: number;
   strokes: number | null;
+  fairwayHit: boolean | null;
+  greenInRegulation: boolean | null;
+  putts: number | null;
 }
 
 // ============================================================
@@ -162,13 +180,23 @@ export interface HoleScore {
 // ============================================================
 
 export type RankTier =
-  | 'rookie'
-  | 'amateur'
-  | 'club_player'
-  | 'scratch'
-  | 'pro'
-  | 'elite'
-  | 'champion'
+  | 'bronze_1'
+  | 'bronze_2'
+  | 'bronze_3'
+  | 'silver_1'
+  | 'silver_2'
+  | 'silver_3'
+  | 'gold_1'
+  | 'gold_2'
+  | 'gold_3'
+  | 'platinum_1'
+  | 'platinum_2'
+  | 'platinum_3'
+  | 'diamond_1'
+  | 'diamond_2'
+  | 'diamond_3'
+  | 'master'
+  | 'grandmaster'
   | 'unreal';
 
 export interface RankInfo {
@@ -180,14 +208,24 @@ export interface RankInfo {
 }
 
 export const RANK_TIERS: RankInfo[] = [
-  { tier: 'rookie',      label: 'Rookie',      icon: '🌱', minPoints: 0,    maxPoints: 199 },
-  { tier: 'amateur',     label: 'Amateur',     icon: '🔰', minPoints: 200,  maxPoints: 499 },
-  { tier: 'club_player', label: 'Club Player', icon: '🏌️', minPoints: 500,  maxPoints: 999 },
-  { tier: 'scratch',     label: 'Scratch',     icon: '⛳', minPoints: 1000, maxPoints: 1999 },
-  { tier: 'pro',         label: 'Pro',         icon: '🎯', minPoints: 2000, maxPoints: 3499 },
-  { tier: 'elite',       label: 'Elite',       icon: '🔥', minPoints: 3500, maxPoints: 5999 },
-  { tier: 'champion',    label: 'Champion',    icon: '🏆', minPoints: 6000, maxPoints: 9999 },
-  { tier: 'unreal',      label: 'Unreal',      icon: '⚡', minPoints: 10000, maxPoints: null },
+  { tier: 'bronze_1',     label: 'Bronze 1',     icon: '🥉', minPoints: 0,      maxPoints: 99 },
+  { tier: 'bronze_2',     label: 'Bronze 2',     icon: '🥉', minPoints: 100,    maxPoints: 249 },
+  { tier: 'bronze_3',     label: 'Bronze 3',     icon: '🥉', minPoints: 250,    maxPoints: 499 },
+  { tier: 'silver_1',     label: 'Silver 1',     icon: '🥈', minPoints: 500,    maxPoints: 749 },
+  { tier: 'silver_2',     label: 'Silver 2',     icon: '🥈', minPoints: 750,    maxPoints: 999 },
+  { tier: 'silver_3',     label: 'Silver 3',     icon: '🥈', minPoints: 1000,   maxPoints: 1499 },
+  { tier: 'gold_1',       label: 'Gold 1',       icon: '🥇', minPoints: 1500,   maxPoints: 1999 },
+  { tier: 'gold_2',       label: 'Gold 2',       icon: '🥇', minPoints: 2000,   maxPoints: 2749 },
+  { tier: 'gold_3',       label: 'Gold 3',       icon: '🥇', minPoints: 2750,   maxPoints: 3499 },
+  { tier: 'platinum_1',   label: 'Platinum 1',   icon: '💎', minPoints: 3500,   maxPoints: 4499 },
+  { tier: 'platinum_2',   label: 'Platinum 2',   icon: '💎', minPoints: 4500,   maxPoints: 5499 },
+  { tier: 'platinum_3',   label: 'Platinum 3',   icon: '💎', minPoints: 5500,   maxPoints: 6999 },
+  { tier: 'diamond_1',    label: 'Diamond 1',    icon: '💠', minPoints: 7000,   maxPoints: 8499 },
+  { tier: 'diamond_2',    label: 'Diamond 2',    icon: '💠', minPoints: 8500,   maxPoints: 9999 },
+  { tier: 'diamond_3',    label: 'Diamond 3',    icon: '💠', minPoints: 10000,  maxPoints: 12499 },
+  { tier: 'master',       label: 'Master',       icon: '🔮', minPoints: 12500,  maxPoints: 14999 },
+  { tier: 'grandmaster',  label: 'Grandmaster',  icon: '👑', minPoints: 15000,  maxPoints: 19999 },
+  { tier: 'unreal',       label: 'Unreal',       icon: '⚡', minPoints: 20000,  maxPoints: null },
 ];
 
 export interface PlayerRanking {

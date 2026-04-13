@@ -1,13 +1,19 @@
 /**
- * Profile Screen — V2 Phase 3
+ * Profile Screen — Redesigned V3
+ *
+ * Clean, playful, premium design with competitive gaming energy.
+ * Brand colors: Primary Green #1B6B3A, Gold #FFD700, Bronze #CD7F32
  *
  * Layout:
- *   1. Header   — avatar (with rank ring), name, username, bio, privacy toggle, edit button
- *   2. Stats bar — rounds, avg score, wins, rank points, friends
- *   3. Badges row — earned rank/achievement badges
- *   4. Golf moods
- *   5. Posts grid — shared round cards
- *   6. Sign out
+ *   1. Header — avatar with rank ring, name, username, handicap, lock badge, edit button
+ *   2. Bio — subtitle with user's bio
+ *   3. Stats bar — rounds, avg score, wins, rank points, friends
+ *   4. Current rank card — tier icon, name, points, progress bar to next tier
+ *   5. Badges — horizontal scroll of earned/locked badges
+ *   6. Rank history — bar chart showing progression over time
+ *   7. Golf moods — chip display of selected moods
+ *   8. Recent rounds grid — 3-column grid of score cards
+ *   9. Sign out button
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -24,34 +30,34 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
-import { RANK_TIERS, RANK_COLORS } from '@par-tee/shared';
+import { COLORS, MOODS, RANK_COLORS, RANK_TIERS } from '@par-tee/shared';
 import type { RankTier } from '@par-tee/shared';
 
 const API_URL = process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:4000';
-const PRIMARY = '#1a7f4b';
 
-const MOODS = [
-  { key: 'relaxed',     label: '😌 Relaxed' },
-  { key: 'competitive', label: '🏆 Competitive' },
-  { key: 'social',      label: '👥 Social' },
-  { key: 'scenic',      label: '🌅 Scenic' },
-  { key: 'beginner',    label: '🌱 Beginner-friendly' },
-  { key: 'advanced',    label: '🔥 Advanced' },
-  { key: 'fast-paced',  label: '⚡ Fast-paced' },
-  { key: 'challenging', label: '💪 Challenging' },
-] as const;
+// Brand colors
+const PRIMARY_GREEN = '#1B6B3A';
+const GOLD = '#FFD700';
+const BRONZE = '#CD7F32';
 
 type MoodKey = (typeof MOODS)[number]['key'];
 
 interface UserProfile {
   id: string;
-  name: string;
+  username: string;
+  displayName: string;
   email: string;
   bio: string | null;
   isPrivate: boolean;
-  handicap: string | null;
+  handicap: number | null;
   moodPreferences: string[];
   avatarUrl: string | null;
+  homeCourseId: string | null;
+  ranking: {
+    tier: RankTier;
+    points: number;
+    rank: number;
+  } | null;
 }
 
 interface RoundPost {
@@ -59,45 +65,22 @@ interface RoundPost {
   courseName: string;
   totalScore: number;
   scoreToPar: number;
-  date: string;
-  holes: number;
+  completedAt: string;
+  holeCount: number;
 }
 
-// Mocked competitive stats until rankings API is wired
-const MOCK_RANK: RankTier = 'scratch';
-const MOCK_RANK_POINTS = 1240;
-const MOCK_ROUNDS_PLAYED = 42;
-const MOCK_AVG_SCORE = 78.4;
-const MOCK_WINS = 9;
-
-const MOCK_EARNED_BADGES: { tier: RankTier; earnedAt: string }[] = [
-  { tier: 'rookie',      earnedAt: 'Jan 2026' },
-  { tier: 'amateur',     earnedAt: 'Feb 2026' },
-  { tier: 'club_player', earnedAt: 'Mar 2026' },
-  { tier: 'scratch',     earnedAt: 'Mar 2026' },
-];
-
-// Rank history data shape
 interface RankHistoryPoint {
-  label: string;   // e.g. "Jan", "Feb"
+  label: string;
   points: number;
   tier: RankTier;
 }
-
-const MOCK_RANK_HISTORY: RankHistoryPoint[] = [
-  { label: 'Oct', points: 0,    tier: 'rookie' },
-  { label: 'Nov', points: 180,  tier: 'rookie' },
-  { label: 'Dec', points: 420,  tier: 'amateur' },
-  { label: 'Jan', points: 650,  tier: 'amateur' },
-  { label: 'Feb', points: 900,  tier: 'club_player' },
-  { label: 'Mar', points: 1240, tier: 'scratch' },
-];
 
 // ─── Rank History Chart ─────────────────────────────────────────────────────
 
 function RankHistoryChart({ history }: { history: RankHistoryPoint[] }) {
   if (history.length === 0) return null;
   const maxPts = Math.max(...history.map((h) => h.points), 1);
+
   return (
     <View style={rh.container}>
       <View style={rh.bars}>
@@ -162,38 +145,66 @@ const rh = StyleSheet.create({
   barIcon: { fontSize: 10 },
 });
 
-// ─── Badge component ────────────────────────────────────────────────────────
+// ─── Badge Pill ─────────────────────────────────────────────────────────────
 
-function BadgePill({ tier, earnedAt }: { tier: RankTier; earnedAt: string }) {
+function BadgePill({
+  tier,
+  earnedAt,
+  isLocked,
+}: {
+  tier: RankTier;
+  earnedAt?: string;
+  isLocked?: boolean;
+}) {
   const info = RANK_TIERS.find((r) => r.tier === tier);
   const colors = RANK_COLORS[tier];
+
+  if (isLocked) {
+    return (
+      <View style={[b.badge, b.badgeLocked]}>
+        <Text style={{ fontSize: 20, opacity: 0.3 }}>{info?.icon}</Text>
+        <Text style={b.badgeLabelLocked}>{info?.label}</Text>
+        <Text style={b.badgeDateLocked}>Locked</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={[b.badge, { backgroundColor: colors.bg, borderColor: colors.border }]}>
       <Text style={{ fontSize: 20 }}>{info?.icon}</Text>
       <Text style={[b.badgeLabel, { color: colors.text }]}>{info?.label}</Text>
-      <Text style={b.badgeDate}>{earnedAt}</Text>
+      <Text style={b.badgeDate}>{earnedAt ?? 'Earned'}</Text>
     </View>
   );
 }
 
-// ─── Round post cell ────────────────────────────────────────────────────────
+// ─── Round Post Cell ────────────────────────────────────────────────────────
 
 function PostCell({ post }: { post: RoundPost }) {
   const diff = post.scoreToPar;
   const diffStr = diff === 0 ? 'E' : diff > 0 ? `+${diff}` : `${diff}`;
-  const diffColor = diff < 0 ? PRIMARY : diff === 0 ? '#374151' : '#dc2626';
+  const diffColor = diff < 0 ? PRIMARY_GREEN : diff === 0 ? '#374151' : '#dc2626';
 
   return (
     <View style={p.cell}>
-      <Text style={[p.cellScore, { color: diffColor }]}>{diffStr}</Text>
+      <View>
+        <Text style={[p.cellScore, { color: diffColor }]}>{diffStr}</Text>
+      </View>
       <Text style={p.cellTotal}>{post.totalScore}</Text>
-      <Text style={p.cellCourse} numberOfLines={2}>{post.courseName}</Text>
-      <Text style={p.cellDate}>{post.date}</Text>
+      <Text style={p.cellCourse} numberOfLines={2}>
+        {post.courseName}
+      </Text>
+      <Text style={p.cellDate}>
+        {new Date(post.completedAt).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+        })}
+      </Text>
     </View>
   );
 }
 
-// ─── Edit profile form ──────────────────────────────────────────────────────
+// ─── Edit Profile Form ──────────────────────────────────────────────────────
 
 function EditProfileForm({
   profile,
@@ -205,9 +216,11 @@ function EditProfileForm({
   onCancel: () => void;
 }) {
   const { session } = useAuth();
-  const [editName, setEditName] = useState(profile.name);
+  const [editName, setEditName] = useState(profile.displayName);
   const [editBio, setEditBio] = useState(profile.bio ?? '');
-  const [editHandicap, setEditHandicap] = useState(profile.handicap ?? '');
+  const [editHandicap, setEditHandicap] = useState(
+    profile.handicap != null ? profile.handicap.toString() : ''
+  );
   const [editPrivate, setEditPrivate] = useState(profile.isPrivate);
   const [editMoods, setEditMoods] = useState<MoodKey[]>(
     (profile.moodPreferences ?? []) as MoodKey[]
@@ -222,7 +235,7 @@ function EditProfileForm({
 
   const save = async () => {
     if (!session || !editName.trim()) {
-      Alert.alert('Name required', 'Please enter your name.');
+      Alert.alert('Name required', 'Please enter your display name.');
       return;
     }
     const handicap = editHandicap.trim() ? parseFloat(editHandicap.trim()) : null;
@@ -234,9 +247,12 @@ function EditProfileForm({
     try {
       const res = await fetch(`${API_URL}/v1/users/me`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
-          name: editName.trim(),
+          displayName: editName.trim(),
           bio: editBio.trim() || null,
           isPrivate: editPrivate,
           handicap,
@@ -260,12 +276,12 @@ function EditProfileForm({
     <ScrollView contentContainerStyle={e.container}>
       <Text style={e.title}>Edit Profile</Text>
 
-      <Text style={e.label}>Name</Text>
+      <Text style={e.label}>Display Name</Text>
       <TextInput
         style={e.input}
         value={editName}
         onChangeText={setEditName}
-        placeholder="Your name"
+        placeholder="Your display name"
         placeholderTextColor="#9ca3af"
         autoCapitalize="words"
       />
@@ -291,7 +307,6 @@ function EditProfileForm({
         keyboardType="decimal-pad"
       />
 
-      {/* Privacy toggle */}
       <View style={e.privacyRow}>
         <View style={{ flex: 1 }}>
           <Text style={e.label}>Private profile</Text>
@@ -300,7 +315,7 @@ function EditProfileForm({
         <Switch
           value={editPrivate}
           onValueChange={setEditPrivate}
-          trackColor={{ false: '#e5e7eb', true: PRIMARY }}
+          trackColor={{ false: '#e5e7eb', true: PRIMARY_GREEN }}
           thumbColor="#fff"
         />
       </View>
@@ -316,7 +331,7 @@ function EditProfileForm({
               onPress={() => toggleMood(mood.key)}
             >
               <Text style={[e.moodChipText, selected && e.moodChipTextSelected]}>
-                {mood.label}
+                {mood.emoji} {mood.label}
               </Text>
             </TouchableOpacity>
           );
@@ -324,7 +339,11 @@ function EditProfileForm({
       </View>
 
       <TouchableOpacity style={e.primaryBtn} onPress={save} disabled={saving}>
-        {saving ? <ActivityIndicator color="#fff" /> : <Text style={e.primaryBtnText}>Save changes</Text>}
+        {saving ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={e.primaryBtnText}>Save changes</Text>
+        )}
       </TouchableOpacity>
       <TouchableOpacity style={e.textBtn} onPress={onCancel}>
         <Text style={e.textBtnText}>Cancel</Text>
@@ -333,60 +352,59 @@ function EditProfileForm({
   );
 }
 
-// ─── Main Screen ───────────────────────────────────────────────────────────
+// ─── Main Profile Screen ────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
   const { session, signOut } = useAuth();
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [sharedRounds, setSharedRounds] = useState<RoundPost[]>([]);
-  const [friendCount, setFriendCount] = useState<number>(0);
-  const [rankHistory, setRankHistory] = useState<RankHistoryPoint[]>(MOCK_RANK_HISTORY);
+  const [friendCount, setFriendCount] = useState(0);
+  const [rankHistory, setRankHistory] = useState<RankHistoryPoint[]>([]);
   const [fetching, setFetching] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [avgScore, setAvgScore] = useState<number | null>(null);
+  const [totalWins, setTotalWins] = useState(0);
 
   const fetchProfile = useCallback(async () => {
     if (!session) return;
     setFetching(true);
     try {
-      const [profileRes, friendsRes] = await Promise.all([
-        fetch(`${API_URL}/v1/users/me`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        }),
-        fetch(`${API_URL}/v1/social/friends`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        }),
-      ]);
-
+      // Fetch user profile
+      const profileRes = await fetch(`${API_URL}/v1/users/me`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
       if (profileRes.ok) {
         const json = await profileRes.json();
         setProfile(json.data);
       }
+
+      // Fetch friend count
+      const friendsRes = await fetch(`${API_URL}/v1/social/friends`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
       if (friendsRes.ok) {
         const json = await friendsRes.json();
         setFriendCount((json.data ?? []).length);
       }
 
-      // Fetch own recent rounds
+      // Fetch recent rounds and calculate stats
       const roundsRes = await fetch(`${API_URL}/v1/rounds/me?limit=6`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (roundsRes.ok) {
         const json = await roundsRes.json();
-        const rounds = (json.data ?? []) as Array<{
-          id: string; courseName: string; totalScore: number; scoreToPar: number;
-          completedAt: string; holeCount: number;
-        }>;
-        setSharedRounds(
-          rounds.map((r) => ({
-            id: r.id,
-            courseName: r.courseName,
-            totalScore: r.totalScore,
-            scoreToPar: r.scoreToPar,
-            date: new Date(r.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-            holes: r.holeCount,
-          }))
-        );
+        const rounds = (json.data ?? []) as RoundPost[];
+        setSharedRounds(rounds);
+
+        // Calculate average score and wins from rounds
+        if (rounds.length > 0) {
+          const totalScore = rounds.reduce((sum, r) => sum + r.totalScore, 0);
+          setAvgScore(totalScore / rounds.length);
+          // Count wins as rounds with negative score to par
+          const wins = rounds.filter((r) => r.scoreToPar < 0).length;
+          setTotalWins(wins);
+        }
       }
 
       // Fetch rank history
@@ -400,13 +418,15 @@ export default function ProfileScreen() {
         }
       }
     } catch {
-      // silent
+      // Silent error handling
     } finally {
       setFetching(false);
     }
   }, [session]);
 
-  useEffect(() => { fetchProfile(); }, [fetchProfile]);
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
 
   const handleSignOut = () => {
     Alert.alert('Sign out', 'Are you sure?', [
@@ -418,7 +438,7 @@ export default function ProfileScreen() {
   if (fetching) {
     return (
       <View style={pr.centered}>
-        <ActivityIndicator size="large" color={PRIMARY} />
+        <ActivityIndicator size="large" color={PRIMARY_GREEN} />
       </View>
     );
   }
@@ -438,43 +458,81 @@ export default function ProfileScreen() {
     return (
       <EditProfileForm
         profile={profile}
-        onSave={(updated) => { setProfile(updated); setEditing(false); }}
+        onSave={(updated) => {
+          setProfile(updated);
+          setEditing(false);
+        }}
         onCancel={() => setEditing(false)}
       />
     );
   }
 
-  const rankInfo = RANK_TIERS.find((r) => r.tier === MOCK_RANK);
-  const rankColors = RANK_COLORS[MOCK_RANK];
+  // Determine current rank (default to bronze_1 if no ranking)
+  const currentRank = profile.ranking?.tier ?? 'bronze_1';
+  const currentPoints = profile.ranking?.points ?? 0;
+  const rankInfo = RANK_TIERS.find((r) => r.tier === currentRank);
+  const rankColors = RANK_COLORS[currentRank];
+
+  // Calculate progress to next tier
+  const currentTierIndex = RANK_TIERS.findIndex((r) => r.tier === currentRank);
+  const nextTierIndex = currentTierIndex + 1;
+  const nextTierInfo =
+    nextTierIndex < RANK_TIERS.length ? RANK_TIERS[nextTierIndex] : null;
+
+  let progressPercent = 0;
+  let pointsToNext = 0;
+  if (nextTierInfo && rankInfo) {
+    const currentMin = rankInfo.minPoints;
+    const nextMin = nextTierInfo.minPoints;
+    const pointsInTier = nextMin - currentMin;
+    const pointsEarned = currentPoints - currentMin;
+    progressPercent = Math.min((pointsEarned / pointsInTier) * 100, 100);
+    pointsToNext = Math.max(nextMin - currentPoints, 0);
+  }
+
+  // Get top 6 badges (earned) and show 12 total
+  const earnedBadges = [currentRank]; // Placeholder: in production, this comes from API
+  const allTiers = RANK_TIERS.slice(0, 12); // Show first 12 tiers
+  const lockedBadges = allTiers.filter((t) => !earnedBadges.includes(t.tier));
+
+  const roundsPlayed = sharedRounds.length;
 
   return (
     <ScrollView
       style={pr.screen}
       contentContainerStyle={pr.content}
-      refreshControl={<RefreshControl refreshing={fetching} onRefresh={fetchProfile} tintColor={PRIMARY} />}
+      refreshControl={
+        <RefreshControl refreshing={fetching} onRefresh={fetchProfile} tintColor={PRIMARY_GREEN} />
+      }
     >
-      {/* ── Header ─────────────────────────────────────────────── */}
+      {/* ── Header Section ──────────────────────────────────────── */}
       <View style={pr.header}>
         <View style={pr.avatarWrap}>
-          <View style={pr.avatar}>
-            <Text style={pr.avatarInitial}>{profile.name.charAt(0).toUpperCase()}</Text>
+          <View style={[pr.avatar, { backgroundColor: rankColors.bg }]}>
+            <Text style={pr.avatarInitial}>
+              {profile.displayName.charAt(0).toUpperCase()}
+            </Text>
           </View>
-          {/* Rank ring badge */}
-          <View style={[pr.rankRing, { borderColor: rankColors.border, backgroundColor: rankColors.bg }]}>
-            <Text style={{ fontSize: 10 }}>{rankInfo?.icon}</Text>
+          <View
+            style={[
+              pr.rankRing,
+              { borderColor: rankColors.border, backgroundColor: rankColors.bg },
+            ]}
+          >
+            <Text style={pr.rankRingIcon}>{rankInfo?.icon}</Text>
           </View>
         </View>
 
         <View style={pr.headerInfo}>
           <View style={pr.nameRow}>
-            <Text style={pr.profileName}>{profile.name}</Text>
+            <Text style={pr.profileName}>{profile.displayName}</Text>
             {profile.isPrivate && (
               <View style={pr.privateBadge}>
-                <Text style={pr.privateBadgeText}>🔒 Private</Text>
+                <Text style={pr.privateBadgeText}>🔒</Text>
               </View>
             )}
           </View>
-          <Text style={pr.profileEmail}>{profile.email}</Text>
+          <Text style={pr.profileUsername}>@{profile.username}</Text>
           {profile.handicap != null && (
             <Text style={pr.handicapText}>HCP {Number(profile.handicap).toFixed(1)}</Text>
           )}
@@ -485,33 +543,35 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Bio */}
+      {/* ── Bio Section ─────────────────────────────────────────── */}
       {profile.bio ? (
         <View style={pr.bioSection}>
           <Text style={pr.bioText}>{profile.bio}</Text>
         </View>
       ) : null}
 
-      {/* ── Stats bar ─────────────────────────────────────────── */}
+      {/* ── Stats Bar ───────────────────────────────────────────── */}
       <View style={pr.statsBar}>
         <View style={pr.statItem}>
-          <Text style={pr.statValue}>{MOCK_ROUNDS_PLAYED}</Text>
+          <Text style={pr.statValue}>{roundsPlayed}</Text>
           <Text style={pr.statLabel}>Rounds</Text>
         </View>
         <View style={pr.statDivider} />
         <View style={pr.statItem}>
-          <Text style={pr.statValue}>{MOCK_AVG_SCORE.toFixed(1)}</Text>
+          <Text style={pr.statValue}>
+            {avgScore ? avgScore.toFixed(1) : '—'}
+          </Text>
           <Text style={pr.statLabel}>Avg Score</Text>
         </View>
         <View style={pr.statDivider} />
         <View style={pr.statItem}>
-          <Text style={pr.statValue}>{MOCK_WINS}</Text>
+          <Text style={pr.statValue}>{totalWins}</Text>
           <Text style={pr.statLabel}>Wins</Text>
         </View>
         <View style={pr.statDivider} />
         <View style={pr.statItem}>
           <Text style={[pr.statValue, { color: rankColors.text }]}>
-            {MOCK_RANK_POINTS.toLocaleString()}
+            {currentPoints.toLocaleString()}
           </Text>
           <Text style={pr.statLabel}>Rank Pts</Text>
         </View>
@@ -522,59 +582,76 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* ── Rank badge ──────────────────────────────────────────── */}
+      {/* ── Current Rank Card ───────────────────────────────────── */}
       <View style={[pr.currentRankCard, { backgroundColor: rankColors.bg, borderColor: rankColors.border }]}>
-        <Text style={{ fontSize: 32 }}>{rankInfo?.icon}</Text>
-        <View style={{ marginLeft: 14, flex: 1 }}>
-          <Text style={[pr.rankLabel, { color: rankColors.text }]}>Current Rank</Text>
-          <Text style={[pr.rankTierName, { color: rankColors.text }]}>{rankInfo?.label}</Text>
-          <Text style={pr.rankPts}>{MOCK_RANK_POINTS.toLocaleString()} pts</Text>
+        <View style={pr.rankCardLeft}>
+          <Text style={pr.rankCardIcon}>{rankInfo?.icon}</Text>
         </View>
-        {/* Availability calendar shortcut */}
-        <TouchableOpacity
-          style={pr.calendarBtn}
-          onPress={() => router.push('/availability')}
-        >
-          <Text style={pr.calendarBtnIcon}>📅</Text>
-          <Text style={pr.calendarBtnText}>Availability</Text>
-        </TouchableOpacity>
+        <View style={pr.rankCardCenter}>
+          <Text style={[pr.rankLabel, { color: rankColors.text }]}>CURRENT RANK</Text>
+          <Text style={[pr.rankTierName, { color: rankColors.text }]}>
+            {rankInfo?.label}
+          </Text>
+          <Text style={[pr.rankPts, { color: rankColors.text }]}>
+            {currentPoints.toLocaleString()} pts
+          </Text>
+
+          {/* Progress bar */}
+          {nextTierInfo && (
+            <View style={pr.progressContainer}>
+              <View style={pr.progressBar}>
+                <View
+                  style={[
+                    pr.progressFill,
+                    { width: `${progressPercent}%`, backgroundColor: rankColors.text },
+                  ]}
+                />
+              </View>
+              <Text style={pr.progressText}>
+                {pointsToNext.toLocaleString()} pts to {nextTierInfo.label}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
 
-      {/* ── Badges row ─────────────────────────────────────────── */}
-      <View style={pr.sectionHeader}>
-        <Text style={pr.sectionTitle}>Badges Earned</Text>
-        <Text style={pr.sectionSub}>{MOCK_EARNED_BADGES.length} of {RANK_TIERS.length}</Text>
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={pr.badgesRow}
-      >
-        {MOCK_EARNED_BADGES.map(({ tier, earnedAt }) => (
-          <BadgePill key={tier} tier={tier} earnedAt={earnedAt} />
-        ))}
-        {/* Locked badges */}
-        {RANK_TIERS.filter((r) => !MOCK_EARNED_BADGES.find((e) => e.tier === r.tier)).map((r) => (
-          <View key={r.tier} style={[b.badge, b.badgeLocked]}>
-            <Text style={{ fontSize: 20, opacity: 0.3 }}>{r.icon}</Text>
-            <Text style={b.badgeLabelLocked}>{r.label}</Text>
-            <Text style={b.badgeDateLocked}>Locked</Text>
+      {/* ── Badges Section ──────────────────────────────────────── */}
+      {allTiers.length > 0 && (
+        <>
+          <View style={pr.sectionHeader}>
+            <Text style={pr.sectionTitle}>Badges Earned</Text>
+            <Text style={pr.sectionSub}>
+              {earnedBadges.length} of {RANK_TIERS.length}
+            </Text>
           </View>
-        ))}
-      </ScrollView>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={pr.badgesRow}
+          >
+            {earnedBadges.map((tier) => (
+              <BadgePill key={tier} tier={tier} />
+            ))}
+            {lockedBadges.slice(0, 6).map((t) => (
+              <BadgePill key={t.tier} tier={t.tier} isLocked />
+            ))}
+          </ScrollView>
+        </>
+      )}
 
-      {/* ── Rank History Chart ─────────────────────────────────── */}
-      <View style={pr.sectionHeader}>
-        <Text style={pr.sectionTitle}>Rank History</Text>
-        <TouchableOpacity onPress={() => router.push('/notifications')}>
-          <Text style={pr.sectionLink}>🔔 Notifications</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={pr.rankHistoryCard}>
-        <RankHistoryChart history={rankHistory} />
-      </View>
+      {/* ── Rank History Chart ──────────────────────────────────── */}
+      {rankHistory.length > 0 && (
+        <>
+          <View style={pr.sectionHeader}>
+            <Text style={pr.sectionTitle}>Rank History</Text>
+          </View>
+          <View style={pr.rankHistoryCard}>
+            <RankHistoryChart history={rankHistory} />
+          </View>
+        </>
+      )}
 
-      {/* ── Moods ────────────────────────────────────────────────── */}
+      {/* ── Golf Moods ──────────────────────────────────────────── */}
       {(profile.moodPreferences?.length ?? 0) > 0 && (
         <View style={pr.moodsSection}>
           <Text style={pr.sectionTitle}>Golf Moods</Text>
@@ -583,7 +660,7 @@ export default function ProfileScreen() {
               const mood = MOODS.find((m) => m.key === key);
               return (
                 <View key={key} style={pr.moodChip}>
-                  <Text style={pr.moodChipText}>{mood?.label ?? key}</Text>
+                  <Text style={pr.moodChipText}>{mood ? `${mood.emoji} ${mood.label}` : key}</Text>
                 </View>
               );
             })}
@@ -591,12 +668,14 @@ export default function ProfileScreen() {
         </View>
       )}
 
-      {/* ── Posts grid ─────────────────────────────────────────── */}
+      {/* ── Recent Rounds Grid ──────────────────────────────────── */}
       <View style={pr.sectionHeader}>
-        <Text style={pr.sectionTitle}>Rounds</Text>
-        <TouchableOpacity onPress={() => router.push('/rounds')}>
-          <Text style={pr.sectionLink}>View all →</Text>
-        </TouchableOpacity>
+        <Text style={pr.sectionTitle}>Recent Rounds</Text>
+        {sharedRounds.length > 0 && (
+          <TouchableOpacity onPress={() => router.push('/rounds')}>
+            <Text style={pr.sectionLink}>View all →</Text>
+          </TouchableOpacity>
+        )}
       </View>
       {sharedRounds.length > 0 ? (
         <View style={pr.postsGrid}>
@@ -606,11 +685,13 @@ export default function ProfileScreen() {
         </View>
       ) : (
         <View style={pr.emptyRounds}>
-          <Text style={pr.emptyRoundsText}>Complete and share rounds to see them here.</Text>
+          <Text style={pr.emptyRoundsText}>
+            Complete and share rounds to see them here.
+          </Text>
         </View>
       )}
 
-      {/* ── Sign out ─────────────────────────────────────────────── */}
+      {/* ── Sign Out Button ─────────────────────────────────────── */}
       <TouchableOpacity style={pr.signOutBtn} onPress={handleSignOut}>
         <Text style={pr.signOutBtnText}>Sign out</Text>
       </TouchableOpacity>
@@ -625,48 +706,59 @@ const pr = StyleSheet.create({
   content: { paddingBottom: 48 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   errorText: { color: '#9ca3af', fontSize: 15, marginBottom: 16 },
-  retryBtn: { paddingHorizontal: 24, paddingVertical: 10, backgroundColor: PRIMARY, borderRadius: 8 },
+  retryBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    backgroundColor: PRIMARY_GREEN,
+    borderRadius: 8,
+  },
   retryBtnText: { color: '#fff', fontWeight: '600' },
 
   // Header
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingHorizontal: 20,
-    paddingTop: 56,
+    paddingTop: 12,
     paddingBottom: 16,
     gap: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
   },
   avatarWrap: { position: 'relative' },
   avatar: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: PRIMARY,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: { fontSize: 28, color: '#fff', fontWeight: '800' },
   rankRing: {
     position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
+    bottom: -6,
+    right: -6,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2.5,
+    borderColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rankRingIcon: { fontSize: 16 },
   headerInfo: { flex: 1 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   profileName: { fontSize: 20, fontWeight: '800', color: '#111' },
-  privateBadge: { backgroundColor: '#f3f4f6', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
-  privateBadgeText: { fontSize: 11, color: '#6b7280', fontWeight: '600' },
-  profileEmail: { fontSize: 13, color: '#9ca3af', marginTop: 2 },
-  handicapText: { fontSize: 13, color: PRIMARY, fontWeight: '700', marginTop: 4 },
+  profileUsername: { fontSize: 13, color: '#9ca3af', marginTop: 2, fontWeight: '500' },
+  privateBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  privateBadgeText: { fontSize: 13 },
+  handicapText: { fontSize: 13, color: PRIMARY_GREEN, fontWeight: '700', marginTop: 4 },
   editBtn: {
     paddingHorizontal: 16,
     paddingVertical: 7,
@@ -677,42 +769,49 @@ const pr = StyleSheet.create({
   editBtnText: { fontSize: 13, fontWeight: '700', color: '#374151' },
 
   // Bio
-  bioSection: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 },
+  bioSection: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 },
   bioText: { fontSize: 14, color: '#374151', lineHeight: 20 },
 
   // Stats bar
   statsBar: {
     flexDirection: 'row',
     paddingVertical: 14,
+    borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderColor: '#f3f4f6',
   },
   statItem: { flex: 1, alignItems: 'center' },
   statDivider: { width: 1, backgroundColor: '#f3f4f6' },
   statValue: { fontSize: 18, fontWeight: '800', color: '#111' },
-  statLabel: { fontSize: 10, color: '#9ca3af', marginTop: 2 },
+  statLabel: { fontSize: 10, color: '#9ca3af', marginTop: 2, fontWeight: '500' },
 
-  // Current rank + calendar
+  // Current rank card
   currentRankCard: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 16,
-    marginTop: 16,
+    marginTop: 20,
+    marginBottom: 20,
     padding: 16,
     borderRadius: 16,
     borderWidth: 1.5,
+    gap: 16,
   },
+  rankCardLeft: { alignItems: 'center', justifyContent: 'center' },
+  rankCardIcon: { fontSize: 40 },
+  rankCardCenter: { flex: 1 },
   rankLabel: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
   rankTierName: { fontSize: 20, fontWeight: '900', marginTop: 2 },
-  rankPts: { fontSize: 12, color: '#9ca3af', marginTop: 2 },
-  calendarBtn: {
-    alignItems: 'center',
-    padding: 8,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.6)',
+  rankPts: { fontSize: 12, marginTop: 2, fontWeight: '600' },
+  progressContainer: { marginTop: 10 },
+  progressBar: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.4)',
+    overflow: 'hidden',
   },
-  calendarBtnIcon: { fontSize: 22 },
-  calendarBtnText: { fontSize: 10, fontWeight: '700', color: '#374151', marginTop: 2 },
+  progressFill: { height: '100%', borderRadius: 3 },
+  progressText: { fontSize: 10, color: '#6b7280', marginTop: 4, fontWeight: '500' },
 
   // Section headers
   sectionHeader: {
@@ -720,17 +819,17 @@ const pr = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'baseline',
     marginHorizontal: 16,
-    marginTop: 24,
-    marginBottom: 10,
+    marginTop: 20,
+    marginBottom: 12,
   },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: '#111' },
-  sectionSub: { fontSize: 13, color: '#9ca3af' },
-  sectionLink: { fontSize: 13, color: PRIMARY, fontWeight: '700' },
+  sectionSub: { fontSize: 13, color: '#9ca3af', fontWeight: '500' },
+  sectionLink: { fontSize: 13, color: PRIMARY_GREEN, fontWeight: '700' },
 
   // Badges
   badgesRow: { paddingLeft: 16, paddingRight: 8, paddingBottom: 4, gap: 8 },
 
-  // Moods
+  // Rank history
   rankHistoryCard: {
     marginHorizontal: 16,
     marginBottom: 8,
@@ -745,13 +844,15 @@ const pr = StyleSheet.create({
     shadowRadius: 6,
     elevation: 1,
   },
-  moodsSection: { paddingHorizontal: 16, marginTop: 20 },
+
+  // Moods
+  moodsSection: { paddingHorizontal: 16, marginTop: 8, marginBottom: 12 },
   moodsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   moodChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: PRIMARY,
+    backgroundColor: PRIMARY_GREEN,
   },
   moodChipText: { fontSize: 13, color: '#fff', fontWeight: '600' },
 
@@ -761,6 +862,7 @@ const pr = StyleSheet.create({
     flexWrap: 'wrap',
     paddingHorizontal: 16,
     gap: 8,
+    marginBottom: 12,
   },
   emptyRounds: { paddingHorizontal: 16, paddingVertical: 12 },
   emptyRoundsText: { fontSize: 14, color: '#9ca3af', textAlign: 'center' },
@@ -769,6 +871,7 @@ const pr = StyleSheet.create({
   signOutBtn: {
     marginHorizontal: 16,
     marginTop: 28,
+    marginBottom: 20,
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
@@ -788,10 +891,10 @@ const b = StyleSheet.create({
     minWidth: 80,
   },
   badgeLabel: { fontSize: 11, fontWeight: '800', marginTop: 4 },
-  badgeDate: { fontSize: 10, color: '#9ca3af', marginTop: 2 },
+  badgeDate: { fontSize: 10, color: '#9ca3af', marginTop: 2, fontWeight: '500' },
   badgeLocked: { backgroundColor: '#f9fafb', borderColor: '#e5e7eb' },
   badgeLabelLocked: { fontSize: 11, fontWeight: '600', color: '#d1d5db', marginTop: 4 },
-  badgeDateLocked: { fontSize: 10, color: '#d1d5db', marginTop: 2 },
+  badgeDateLocked: { fontSize: 10, color: '#d1d5db', marginTop: 2, fontWeight: '500' },
 });
 
 const p = StyleSheet.create({
@@ -802,6 +905,8 @@ const p = StyleSheet.create({
     borderRadius: 14,
     padding: 10,
     justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
   cellScore: { fontSize: 20, fontWeight: '900' },
   cellTotal: { fontSize: 28, fontWeight: '900', color: '#111', lineHeight: 30 },
@@ -810,7 +915,12 @@ const p = StyleSheet.create({
 });
 
 const e = StyleSheet.create({
-  container: { flexGrow: 1, padding: 24, backgroundColor: '#fff', paddingBottom: 48 },
+  container: {
+    flexGrow: 1,
+    padding: 24,
+    backgroundColor: '#fff',
+    paddingBottom: 48,
+  },
   title: { fontSize: 22, fontWeight: '800', color: '#111', marginBottom: 24, marginTop: 56 },
   label: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6 },
   input: {
@@ -842,11 +952,11 @@ const e = StyleSheet.create({
     borderColor: '#e5e7eb',
     backgroundColor: '#f9f9f9',
   },
-  moodChipSelected: { backgroundColor: PRIMARY, borderColor: PRIMARY },
+  moodChipSelected: { backgroundColor: PRIMARY_GREEN, borderColor: PRIMARY_GREEN },
   moodChipText: { fontSize: 13, color: '#444' },
   moodChipTextSelected: { color: '#fff', fontWeight: '600' },
   primaryBtn: {
-    backgroundColor: PRIMARY,
+    backgroundColor: PRIMARY_GREEN,
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
@@ -854,5 +964,5 @@ const e = StyleSheet.create({
   },
   primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   textBtn: { alignItems: 'center', paddingVertical: 8 },
-  textBtnText: { color: PRIMARY, fontSize: 15 },
+  textBtnText: { color: PRIMARY_GREEN, fontSize: 15 },
 });

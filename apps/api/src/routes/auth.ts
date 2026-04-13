@@ -13,29 +13,23 @@ router.post('/verify', strictRateLimit, authMiddleware, async (c) => {
   const user = c.get('user');
   const supabase = createAdminClient();
 
-  // Upsert user profile in users table
-  const { data: profile, error } = await supabase
+  // Look up user by supabase_user_id (NOT by id — those are different)
+  const { data: profile } = await supabase
     .from('users')
-    .upsert(
-      {
-        id: user.id,
-        email: user.email,
-        updatedAt: new Date().toISOString(),
-      },
-      { onConflict: 'id', ignoreDuplicates: false }
-    )
-    .select()
+    .select('*')
+    .eq('supabase_user_id', user.id)
     .single();
 
-  if (error) {
-    // If upsert fails (e.g. column mismatch), just fetch existing
-    const { data: existing } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-    return c.json({ user: existing ?? { id: user.id, email: user.email } });
+  if (!profile) {
+    // No profile yet — user needs to go through onboarding
+    return c.json({ user: { supabaseUserId: user.id, email: user.email, needsOnboarding: true } });
   }
+
+  // Touch updated_at
+  await supabase
+    .from('users')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', profile.id);
 
   return c.json({ user: profile });
 });
@@ -48,11 +42,11 @@ router.get('/me', authMiddleware, async (c) => {
   const { data, error } = await supabase
     .from('users')
     .select('*')
-    .eq('id', user.id)
+    .eq('supabase_user_id', user.id)
     .single();
 
   if (error || !data) {
-    return c.json({ user: { id: user.id, email: user.email } });
+    return c.json({ user: null, needsOnboarding: true }, 404);
   }
 
   return c.json({ user: data });
@@ -77,10 +71,19 @@ router.patch('/profile', authMiddleware, zValidator('json', profileSchema), asyn
   if (body.handicap !== undefined) updates['handicap'] = body.handicap;
   if (body.homeCourseId !== undefined) updates['home_course_id'] = body.homeCourseId;
 
+  // First resolve the user's profile ID from supabase_user_id
+  const { data: profile } = await supabase
+    .from('users')
+    .select('id')
+    .eq('supabase_user_id', user.id)
+    .single();
+
+  if (!profile) badRequest('User profile not found');
+
   const { data, error } = await supabase
     .from('users')
     .update(updates)
-    .eq('id', user.id)
+    .eq('id', profile.id)
     .select()
     .single();
 
